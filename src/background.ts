@@ -108,6 +108,60 @@ chrome.runtime.onInstalled.addListener(function () {
     }, 1500);
 });
 
+chrome.webRequest.onBeforeRequest.addListener(
+    function (details) {
+        if (/\/web-dynamic\/[^/]*\/feed\/all(?:\?|$)/.test(details.url)
+            && !details.initiator.includes('extension')
+            && Config.config.dynamicAdBlocker) {
+            dynamicRequest(details.url, details.tabId);
+            return;
+        }
+        if (/\/web-dynamic\/[^/]*\/feed\/space(?:\?|$)/.test(details.url)
+            && !details.initiator.includes('extension')
+            && Config.config.dynamicAdBlocker
+            && Config.config.dynamicSpaceAdBlocker) {
+            dynamicRequest(details.url, details.tabId);
+            return;
+        }
+        return;
+    },
+    { urls: ["https://*.bilibili.com/*"] }
+);
+
+async function dynamicRequest(url: string, tabId: number) {
+    const response = await fetch(url);
+    const Data = await response.json();
+    const AD_dynamic: string[] = [];
+
+    Data.data.items.filter(item => {
+        const dynamicModule = item?.modules?.module_dynamic;
+        const authorModule = item?.modules?.module_author;
+        //转发动态的原始动态
+        const dynamicModuleorigin = item?.orig?.modules?.module_dynamic;
+        const authorModuleorigin = item?.orig?.modules?.module_author;
+
+        const hasGoods =
+            dynamicModule?.goods ||
+            dynamicModule?.major?.opus?.summary?.rich_text_nodes?.some(item => item?.goods) ||
+            dynamicModuleorigin?.goods ||
+            dynamicModuleorigin?.major?.opus?.summary?.rich_text_nodes?.some(item => item?.goods);
+
+        const isWhitelisted =
+            Config?.config?.whitelistedChannels?.includes(authorModule?.mid?.toString()) ||
+            Config?.config?.whitelistedChannels?.includes(authorModuleorigin?.mid?.toString());
+
+        if (hasGoods && (!isWhitelisted || Config.config.dynamicAdWhitelistedChannels) && dynamicModuleorigin) {
+            AD_dynamic.push(item.orig.id_str);
+        } else if (hasGoods && !isWhitelisted ) {
+            AD_dynamic.push(item.id_str);
+        }
+    });
+
+    if(AD_dynamic.length > 0){
+        chrome.tabs.sendMessage(tabId, { type: 'updateAD_dynamic', data: AD_dynamic })
+    }
+}
+
 /**
  * Only works on Firefox.
  * Firefox requires that it be applied after every extension restart.

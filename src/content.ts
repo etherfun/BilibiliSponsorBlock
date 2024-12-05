@@ -2864,3 +2864,31 @@ function setCategoryColorCSSVariables() {
 
     styleContainer.innerText = css;
 }
+
+chrome.runtime.onMessage.addListener(function (message) {
+    if (message.type === 'updateAD_dynamic') {
+        setTimeout(() => {
+            const items = document.querySelector(".bili-dyn-list__items");
+
+            items.querySelectorAll(".dyn-card-opus").forEach(node => {
+                const dynId = node.getAttribute?.("dyn-id");
+                if (dynId && message.data.includes(dynId)) {
+                    const parentItem = node.closest(".bili-dyn-list__item");
+                    if (parentItem) {
+                        parentItem.remove();
+                    }
+                }
+            });
+
+            items.querySelectorAll(".bili-dyn-card-video").forEach(node => {
+                const dynId = node.getAttribute?.("dyn-id");
+                if (dynId && message.data.includes(dynId)) {
+                    const parentItem = node.closest(".bili-dyn-list__item");
+                    if (parentItem) {
+                        parentItem.remove();
+                    }
+                }
+            });
+        }, 500);
+    }
+});

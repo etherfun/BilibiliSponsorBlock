@@ -1,6 +1,7 @@
 {
   "manifest_version": 2,
   "permissions": [
+    "webRequest",
     "storage",
     "scripting",
     "https://*.bilibili.com/*",
