@@ -88,3 +88,40 @@ function init(): void {
 }
 
 init();
+
+function addUserId() {
+    if (!document.body) {
+        setTimeout(addUserId, 50);
+        return;
+    }
+
+    let pageObserver = new MutationObserver((mutationList, observer) => {
+        for (let el of document.getElementsByClassName("bili-dyn-item")) {
+            const {mid, type} = (el as unknown as { __vue__: { author: { mid: number, type: string } } }).__vue__.author;
+            if (mid && type == "AUTHOR_TYPE_NORMAL") {
+                el.getElementsByClassName("bili-dyn-item__avatar")[0].setAttribute("bilisponsor-userid", mid.toString());
+            }
+        }
+    
+        for (let el of document.getElementsByClassName("bili-dyn-title")) {
+            const { mid, type } = (el as unknown as { __vue__: { author: { mid: number, type: string } } }).__vue__.author;
+            if (mid && type == "AUTHOR_TYPE_NORMAL") {
+                el.getElementsByClassName("bili-dyn-title__text")[0].setAttribute("bilisponsor-userid", mid.toString());
+            }
+        }
+    
+        for (const el of document.querySelectorAll(".dyn-orig-author__face, .dyn-orig-author__name")) {
+            const uid = (el as unknown as { _profile?: { uid: number } })?._profile?.uid;
+            if (uid) {
+                el.setAttribute("bilisponsor-userid", uid.toString());
+            }
+        }
+    });
+
+    pageObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+    });
+}
+
+addUserId();

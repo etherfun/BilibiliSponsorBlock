@@ -23,6 +23,7 @@ interface SBConfig {
     defaultCategory: Category;
     renderSegmentsAsChapters: boolean;
     whitelistedChannels: string[];
+    dynamicAdWhitelistedChannels: boolean,
     forceChannelCheck: boolean;
     minutesSaved: number;
     skipCount: number;
@@ -87,6 +88,8 @@ interface SBConfig {
     showPreviewYoutubeButton: boolean;
     showPortVideoButton: boolean;
     cleanPopup: boolean;
+    dynamicAdBlocker: boolean,
+    dynamicSpaceAdBlocker: boolean,
 
     showNewIcon: boolean;
 
@@ -205,6 +208,7 @@ const syncDefaults = {
     defaultCategory: "chooseACategory" as Category,
     renderSegmentsAsChapters: false,
     whitelistedChannels: [],
+    dynamicAdWhitelistedChannels: false,
     forceChannelCheck: false,
     minutesSaved: 0,
     skipCount: 0,
@@ -267,6 +271,8 @@ const syncDefaults = {
     showPreviewYoutubeButton: true,
     showPortVideoButton: true,
     cleanPopup: false,
+    dynamicAdBlocker: false,
+    dynamicSpaceAdBlocker: false,
 
     showNewIcon: true,
 

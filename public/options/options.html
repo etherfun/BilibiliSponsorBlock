@@ -69,6 +69,50 @@
 
 				<div id="category-type" data-type="react-CategoryChooserComponent"></div>
 
+				<div data-type="toggle" data-sync="dynamicAdBlocker">
+					<div class="switch-container">
+						<label class="switch">
+							<input id="dynamicAdBlocker" type="checkbox" checked>
+							<span class="slider round"></span>
+						</label>
+						<label class="switch-label" for="dynamicAdBlocker">
+							__MSG_dynamicAdBlocker__
+						</label>
+					</div>
+					<div class="small-description">__MSG_dynamicAdBlockerDescription__</div>
+				
+				
+					<div data-type="toggle" data-sync="dynamicSpaceAdBlocker" data-dependent-on="dynamicAdBlocker">
+				
+						<br />
+						<div class="switch-container">
+							<label class="switch">
+								<input id="dynamicSpaceAdBlocker" type="checkbox" checked>
+								<span class="slider round"></span>
+							</label>
+							<label class="switch-label" for="dynamicSpaceAdBlocker">
+								__MSG_dynamicSpaceAdBlocker__
+							</label>
+						</div>
+						<div class="small-description">__MSG_dynamicSpaceAdBlockerDescription__</div>
+					</div>
+				
+					<div data-type="toggle" data-sync="dynamicAdWhitelistedChannels" data-dependent-on="dynamicAdBlocker">
+				
+						<br />
+						<div class="switch-container">
+							<label class="switch">
+								<input id="dynamicAdWhitelistedChannels" type="checkbox" checked>
+								<span class="slider round"></span>
+							</label>
+							<label class="switch-label" for="dynamicAdWhitelistedChannels">
+								__MSG_dynamicAdWhitelistedChannels__
+							</label>
+						</div>
+						<div class="small-description">__MSG_dynamicAdWhitelistedChannelsDescription__</div>
+					</div>
+				</div>
+
 				<div data-type="toggle" data-sync="muteSegments">
 					<div class="switch-container">
 						<label class="switch">
@@ -93,7 +137,7 @@
 					<div class="small-description">__MSG_audioNotificationDescription__</div>
 				</div>
 
-				<div data-type="toggle" data-sync="fullVideoSegments" class="no-bottom-border">
+				<div data-type="toggle" data-sync="fullVideoSegments">
 					<div class="switch-container">
 						<label class="switch">
 							<input id="fullVideoSegments" type="checkbox" checked>
@@ -103,17 +147,19 @@
 							__MSG_fullVideoSegments__
 						</label>
 					</div>
-				</div>
-
-				<div data-type="toggle" data-sync="fullVideoLabelsOnThumbnails" data-dependent-on="fullVideoSegments">
-					<div class="switch-container">
-						<label class="switch">
-							<input id="fullVideoLabelsOnThumbnails" type="checkbox" checked>
-							<span class="slider round"></span>
-						</label>
-						<label class="switch-label" for="fullVideoLabelsOnThumbnails">
-							__MSG_fullVideoLabelsOnThumbnails__
-						</label>
+				
+					<div data-type="toggle" data-sync="fullVideoLabelsOnThumbnails" data-dependent-on="fullVideoSegments">
+						
+						<br />
+						<div class="switch-container">
+							<label class="switch">
+								<input id="fullVideoLabelsOnThumbnails" type="checkbox" checked />
+								<span class="slider round"></span>
+							</label>
+							<label class="switch-label" for="fullVideoLabelsOnThumbnails">
+								__MSG_fullVideoLabelsOnThumbnails__
+							</label>
+						</div>
 					</div>
 				</div>
 

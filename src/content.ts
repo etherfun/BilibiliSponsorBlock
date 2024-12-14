@@ -64,6 +64,7 @@ import {
     updateFrameRate,
 } from "./utils/video";
 import { openWarningDialog } from "./utils/warnings";
+import { DynamicListener } from "./render/DynamicAdBlock"
 
 cleanPage();
 
@@ -230,6 +231,10 @@ const manualSkipPercentCount = 0.5;
 
 //get messages from the background script and the popup
 chrome.runtime.onMessage.addListener(messageListener);
+
+if (window.location.href.includes('t.bilibili.com')
+    || window.location.href.includes('space.bilibili.com')
+) DynamicListener();
 
 function messageListener(
     request: Message,

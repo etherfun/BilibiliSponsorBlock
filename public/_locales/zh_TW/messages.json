@@ -730,6 +730,9 @@
     "category_livestream_messages_short": {
         "message": "閱讀消息"
     },
+    "category_forward_sponsor": {
+        "message": "轉發廣告"
+    },
     "autoSkip": {
         "message": "自動跳過"
     },
@@ -1217,5 +1220,29 @@
     },
     "refreshFailed": {
         "message": "更新失敗！"
+    },
+    "dynamicAdBlocker": {
+        "message": "隐藏动态主页的广告 (不包含视频)"
+    },
+    "dynamicAdBlockerDescription": {
+        "message": "广告即包含商品链接的动态，目前阶段无法屏蔽部分软广，因为部分软广可能不附带链接或链接在评论区"
+    },
+    "dynamicSpaceAdBlocker": {
+        "message": "隐藏UP主主页动态的广告"
+    },
+    "dynamicSpaceAdBlockerDescription": {
+        "message": "开启后UP主主页动态的广告也会隐藏，不推荐开启，以方便查看UP主的完整动态"
+    },
+    "dynamicAdWhitelistedChannels": {
+        "message": "无视您的白名单"
+    },
+    "dynamicAdWhitelistedChannelsDescription": {
+        "message": "开启后将会隐藏全部广告，即使是您白名单中的UP主"
+    },
+    "dynamicAdShow": {
+        "message": "显示广告内容"
+    },
+    "dynamicAdHide": {
+        "message": "隐藏广告内容"
     }
 }
