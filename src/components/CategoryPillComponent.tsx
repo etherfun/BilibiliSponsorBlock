@@ -58,7 +58,7 @@ class CategoryPillComponent extends React.Component<CategoryPillProps, CategoryP
                                     title={chrome.i18n.getMessage("upvote")}
                                     onClick={(e) => this.vote(e, 1)}
                                 >
-                                    <ThumbsUpSvg fill={Config.config.colorPalette.white} />
+                                    <ThumbsUpSvg fill={Config.config.colorPalette.white} width="16" height="16" />
                                     <span>{chrome.i18n.getMessage("upvote")}</span>
                                 </div>
                                 <div
@@ -66,7 +66,11 @@ class CategoryPillComponent extends React.Component<CategoryPillProps, CategoryP
                                     title={chrome.i18n.getMessage("reportButtonInfo")}
                                     onClick={(e) => this.vote(e, 0)}
                                 >
-                                    <ThumbsDownSvg fill={downvoteButtonColor(null, null, SkipNoticeAction.Downvote)} />
+                                    <ThumbsDownSvg
+                                        fill={downvoteButtonColor(null, null, SkipNoticeAction.Downvote)}
+                                        width="16"
+                                        height="16"
+                                    />
                                     <span>{chrome.i18n.getMessage("downvote")}</span>
                                 </div>
                             </div>

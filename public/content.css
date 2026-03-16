@@ -983,6 +983,8 @@ input::-webkit-inner-spin-button {
 }
 
 .voteRequestContainer .voteButton {
+	align-items: center;
+    height: 14px;
 	border: white 1px solid;
 	border-radius: 32px;
 	padding: 4px 6px;
