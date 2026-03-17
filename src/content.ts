@@ -9,15 +9,15 @@ import advanceSkipNotice from "./render/advanceSkipNotice";
 import { CategoryPill } from "./render/CategoryPill";
 import { ChapterVote } from "./render/ChapterVote";
 import { DescriptionPortPill } from "./render/DescriptionPortPill";
-import { DynamicListener, CommentListener } from "./render/DynamicAndCommentSponsorBlock";
+import { CommentListener, DynamicListener } from "./render/DynamicAndCommentSponsorBlock";
 import { setMessageNotice, showMessage } from "./render/MessageNotice";
 import { PlayerButton } from "./render/PlayerButton";
 import SkipNotice from "./render/SkipNotice";
 import SubmissionNotice from "./render/SubmissionNotice";
-import { FetchResponse } from "./requests/type/requestType";
 import { getPortVideoByHash, postPortVideo, postPortVideoVote, updatePortedSegments } from "./requests/portVideo";
 import { asyncRequestToServer } from "./requests/requests";
 import { getSegmentsByVideoID } from "./requests/segments";
+import { FetchResponse } from "./requests/type/requestType";
 import { getVideoLabel } from "./requests/videoLabels";
 import { checkPageForNewThumbnails, setupThumbnailListener } from "./thumbnail-utils/thumbnailManagement";
 import {
@@ -41,7 +41,7 @@ import {
     YTID,
 } from "./types";
 import Utils from "./utils";
-import { isFirefox, isFirefoxOrSafari, isSafari, sleep, waitFor } from "./utils/";
+import { isFirefox, isFirefoxOrSafari, isSafari, waitFor } from "./utils/";
 import { AnimationUtils } from "./utils/animationUtils";
 import { addCleanupListener, cleanPage } from "./utils/cleanup";
 import { defaultPreviewTime } from "./utils/constants";
@@ -52,7 +52,7 @@ import { importTimes } from "./utils/exporter";
 import { getErrorMessage, getFormattedTime } from "./utils/formating";
 import { GenericUtils } from "./utils/genericUtils";
 import { getHash, getVideoIDHash, HashedValue } from "./utils/hash";
-import { getCidMapFromWindow } from "./utils/injectedScriptMessageUtils";
+import { getCidMapFromWindow, sourceId } from "./utils/injectedScriptMessageUtils";
 import { logDebug } from "./utils/logger";
 import { getControls, getHashParams, getProgressBar, isPlayingPlaylist } from "./utils/pageUtils";
 import { getBilibiliVideoID } from "./utils/parseVideoID";
@@ -65,11 +65,11 @@ import {
     getBvID,
     getChannelIDInfo,
     getCid,
+    getFrameRate,
     getPageType,
     getVideo,
     getVideoID,
     setupVideoModule,
-    getFrameRate,
     waitForVideo,
 } from "./utils/video";
 import { parseBvidAndCidFromVideoId } from "./utils/videoIdUtils";
@@ -147,17 +147,13 @@ let sponsorSkipped: boolean[] = [];
 
 let videoMuted = false; // Has it been attempted to be muted
 
-// TODO: More robust way to check for page loaded
-let headerLoaded = false;
+let pageLoaded = false;
 setupPageLoadingListener();
 
 setupVideoModule({ videoIDChange, channelIDChange, resetValues, videoElementChange });
 
-// 首页等待页面加载完毕后再检测封面，避免干扰hydration
-if (getPageType() !== PageType.Main) {
-    setupThumbnailListener();
-}
-waitFor(() => getPageLoaded()).then(setupThumbnailListener);
+// wait for hydration to complete
+waitFor(() => getPageLoaded(), 10000, 100).then(setupThumbnailListener);
 
 setMessageNotice(false, getPageLoaded);
 
@@ -170,26 +166,50 @@ const playerButton = new PlayerButton(
 );
 
 /**
- *  根据页面元素加载状态判断页面是否加载完成
+ *  Wait for the page to be truly available (Vue mount/hydration completed) before allowing the plugin to operate on the DOM.
+ *
+ *  Primary: Listen for "pageReady" messages from MAIN world
+ *  Fallback: If no message is received within 30s, use readyState=complete + 2s delay fallback
  */
-async function setupPageLoadingListener() {
-    // header栏会加载组件，登录后触发5次mutation，未登录触发4次mutation
-    const header = await waitFor(() => document.querySelector("#biliMainHeader, .bili-header"), 10000, 100);
-    let mutationCounter = 0;
-    const headerObserver = new MutationObserver(async () => {
-        mutationCounter += 1;
-        if (mutationCounter >= 4) {
-            headerObserver.disconnect();
-            // 再等待500ms，确保页面加载完成
-            await sleep(500);
-            headerLoaded = true;
+function setupPageLoadingListener(): void {
+    const TAG = "[BSB-pageReady]";
+    const t0 = performance.now();
+
+    let resolved = false;
+    const markReady = (reason: string) => {
+        if (resolved) return;
+        resolved = true;
+        const elapsed = Math.round(performance.now() - t0);
+        console.debug(`${TAG} Page ready (${reason}) at +${elapsed}ms`);
+        pageLoaded = true;
+    };
+
+    // Primary: listen for Vue-mount notification from MAIN world (document.ts)
+    window.addEventListener("message", (e: MessageEvent) => {
+        if (e.data?.source === sourceId && e.data?.type === "pageReady") {
+            markReady("vue-mount signal from MAIN world");
         }
     });
-    headerObserver.observe(header, { childList: true, subtree: true });
+
+    // Fallback: if the MAIN world signal never arrives (e.g. document.js
+    // failed to load, or a page type that doesn't mount Vue on #app),
+    // fall back to readyState=complete + 2 s delay.
+    const FALLBACK_TIMEOUT = 30000;
+    setTimeout(() => {
+        if (!resolved) {
+            if (document.readyState === "complete") {
+                markReady(`fallback: readyState already complete after ${FALLBACK_TIMEOUT}ms`);
+            } else {
+                window.addEventListener("load", () => {
+                    setTimeout(() => markReady("fallback: window.load + 2s delay"), 2000);
+                }, { once: true });
+            }
+        }
+    }, FALLBACK_TIMEOUT);
 }
 
 export function getPageLoaded() {
-    return headerLoaded;
+    return pageLoaded;
 }
 
 //the video id of the last preview bar update
