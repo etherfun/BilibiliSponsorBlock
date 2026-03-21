@@ -1,10 +1,9 @@
-import { BilibiliResponse, BiliPlayInfo, BiliVideoDetail } from "../requests/type/BilibiliRequestType";
 import { BVID } from "../types";
 import { waitFor } from "../utils/";
 import { InjectedScriptMessageSend, sourceId } from "../utils/injectedScriptMessageUtils";
-import { getBvid, saveAidFromDetail } from "./aidMap";
+import { getBvid } from "./aidMap";
 import { getCidFromBvIdPage, getCidMap } from "./cidListMap";
-import { getFrameRate, playUrlResponseToPlayInfo, savePlayInfo } from "./frameRateUtils";
+import { getFrameRate } from "./frameRateUtils";
 
 const sendMessageToContent = (messageData: InjectedScriptMessageSend, payload): void => {
     window.postMessage(
@@ -17,56 +16,6 @@ const sendMessageToContent = (messageData: InjectedScriptMessageSend, payload): 
         "/"
     );
 };
-
-function overwriteFetch() {
-    const originalFetch = window.fetch;
-
-    window.fetch = async function (input, init) {
-        const urlStr = typeof input === "string" ? input : (input as Request).url;
-        const response = await originalFetch(input, init);
-        response
-            .clone()
-            .text()
-            .then((res) => processURLRequest(new URL(urlStr, window.location.href), res))
-            .catch((e) => {
-                console.error("[BSB] Error processing URL Request: ", e);
-            });
-        return response;
-    };
-}
-
-function overwriteXHR() {
-    const originalSend = XMLHttpRequest.prototype.send;
-
-    XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, body?: Document | BodyInit | null) {
-        this.addEventListener("loadend", function () {
-            if (this.readyState === this.DONE && this.status >= 200 && this.status < 300) {
-                try {
-                    if (this.responseType === "" || this.responseType === "text") {
-                        const url = new URL(this.responseURL);
-                        processURLRequest(url, this.responseText);
-                    }
-                } catch (e) {
-                    console.error("[BSB] Error processing URL Request: ", e);
-                }
-            }
-        });
-        originalSend.call(this, body);
-    };
-}
-
-function processURLRequest(url: URL, responseText: string): void {
-    if (url.pathname.startsWith("/player/wbi/playurl")) {
-        const response = JSON.parse(responseText) as BilibiliResponse<BiliPlayInfo>;
-        const cid = url.searchParams.get("cid");
-        if (cid && response?.data?.dash?.video) {
-            savePlayInfo(cid, playUrlResponseToPlayInfo(response.data));
-        }
-    } else if (url.pathname.startsWith("/x/player/wbi/v2")) {
-        const response = JSON.parse(responseText) as BilibiliResponse<BiliVideoDetail>;
-        saveAidFromDetail(response.data);
-    }
-}
 
 async function windowMessageListener(message: MessageEvent) {
     const data: InjectedScriptMessageSend = message.data;
@@ -171,8 +120,6 @@ function detectVueMountAndNotify(): void {
 
 function init(): void {
     window.addEventListener("message", windowMessageListener);
-    overwriteFetch();
-    overwriteXHR();
     detectVueMountAndNotify();
     if (window.location.href.includes("t.bilibili.com") || window.location.href.includes("space.bilibili.com")) {
         addMid();
