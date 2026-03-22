@@ -154,7 +154,9 @@ export class GenericTooltip {
                           ))
                         : null}
 
-                    {props.elements}
+                    {props.elements.map((el, index) => (
+                        <React.Fragment key={index}>{el}</React.Fragment>
+                    ))}
 
                     {!props.buttonsAtBottom && this.getButtons(props.buttons, props.buttonsAtBottom)}
                 </div>
@@ -184,25 +186,19 @@ export class GenericTooltip {
         );
     }
 
-    private getTextElements(text: string): JSX.Element[] {
-        if (!text.includes("\n")) return [<>{text}</>];
+    private getTextElements(text: string): React.ReactNode {
+        if (!text.includes("\n")) return text;
 
-        const result: JSX.Element[] = [];
-
-        for (const line of text.split("\n")) {
-            result.push(
-                <div
-                    style={{
-                        padding: "5px",
-                    }}
-                    key={line}
-                >
-                    {line}
-                </div>
-            );
-        }
-
-        return result;
+        return text.split("\n").map((line, index) => (
+            <div
+                style={{
+                    padding: "5px",
+                }}
+                key={index}
+            >
+                {line}
+            </div>
+        ));
     }
 
     getButtons(buttons: ButtonListener[] | undefined, buttonsAtBottom: boolean): JSX.Element[] {
