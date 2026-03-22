@@ -2,7 +2,7 @@ import * as React from "react";
 import { createRoot, Root } from "react-dom/client";
 import CategoryPillComponent, { CategoryPillState } from "../components/CategoryPillComponent";
 import Config from "../config";
-import { getPageLoaded } from "../content";
+import { getPageLoaded } from "../content/state";
 import { VoteResponse } from "../messageTypes";
 import { Category, SegmentUUID, SponsorTime } from "../types";
 import { waitFor } from "../utils/";

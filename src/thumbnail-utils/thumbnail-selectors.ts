@@ -151,6 +151,7 @@ const pageTypeSepecialSelector: { [key in PageType]: string[] } = {
     [PageType.Live]: [],
     [PageType.Opus]: [],
     [PageType.Unknown]: [],
+    [PageType.Unsupported]: [],
     [PageType.Embed]: [],
     [PageType.Festival]: ["festivalPage"],
 };

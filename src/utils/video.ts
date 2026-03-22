@@ -235,7 +235,11 @@ export function detectPageType(): PageType {
     } else if (urlObject.hostname === "space.bilibili.com") {
         pageType = PageType.Channel;
     } else if (urlObject.hostname === "message.bilibili.com") {
-        pageType = PageType.Message;
+        if (urlObject.pathname === "/pages/nav/header_sync") {
+            pageType = PageType.Unsupported;
+        } else {
+            pageType = PageType.Message;
+        }
     } else if (urlObject.hostname === "manga.bilibili.com") {
         pageType = PageType.Manga;
     } else if (urlObject.hostname === "live.bilibili.com") {

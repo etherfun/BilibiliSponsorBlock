@@ -1,5 +1,6 @@
 export enum PageType {
     Unknown = "unknown",
+    Unsupported = "unsupported",
     Main = "main",
     History = "history",
     OldHistory = "oldHistory",

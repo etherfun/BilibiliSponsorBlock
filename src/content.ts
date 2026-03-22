@@ -85,130 +85,130 @@ import {
     setupVideoModule,
 } from "./utils/video";
 
-cleanPage();
-
 detectPageType();
-
-if (getPageType() === PageType.Live) {
-    throw new Error("BSB is disabled on live pages.");
-}
 
 const utils = new Utils();
 
-waitFor(() => Config.isReady(), 5000, 10).then(() => {
-    setCategoryColorCSSVariables();
-
-    if ([PageType.Dynamic, PageType.Channel].includes(detectPageType()) &&
-        (Config.config.dynamicAndCommentSponsorBlocker && Config.config.dynamicSponsorBlock)
-    ) DynamicListener();
-
-    if ([PageType.Video, PageType.List, PageType.Dynamic, PageType.Channel, PageType.Opus, PageType.Festival].includes(getPageType()) &&
-        (Config.config.dynamicAndCommentSponsorBlocker && Config.config.commentSponsorBlock)
-    ) CommentListener();
-});
-
-if ((document.hidden && getPageType() == PageType.Video) || ([PageType.Video, PageType.Festival].includes(getPageType()))) {
-    document.addEventListener("visibilitychange", () => videoElementChange(true, getVideo()), { once: true });
-    window.addEventListener("mouseover", () => videoElementChange(true, getVideo()), { once: true });
+if (getPageType() === PageType.Unsupported || getPageType() === PageType.Live) {
+    logDebug(`Skipping content initialization on unsupported page: ${window.location.href}`);
+} else {
+    init();
 }
 
-setupPageLoadingListener();
+function init(): void {
+    cleanPage();
 
-initDanmakuSkip({
-    getVirtualTime,
-    isSegmentMarkedNearCurrentTime,
-    skipToTime,
-    openSubmissionMenu,
-});
+    waitFor(() => Config.isReady(), 5000, 10).then(() => {
+        setCategoryColorCSSVariables();
 
-initHotkeyHandler({ startOrEndTimingNewSegment, submitSegments, openSubmissionMenu, previewRecentSegment });
+        if ([PageType.Dynamic, PageType.Channel].includes(detectPageType()) &&
+            (Config.config.dynamicAndCommentSponsorBlocker && Config.config.dynamicSponsorBlock)
+        ) DynamicListener();
 
-initPreviewBarManager({ voteAsync, updateVisibilityOfPlayerControlsButton });
+        if ([PageType.Video, PageType.List, PageType.Dynamic, PageType.Channel, PageType.Opus, PageType.Festival].includes(getPageType()) &&
+            (Config.config.dynamicAndCommentSponsorBlocker && Config.config.commentSponsorBlock)
+        ) CommentListener();
+    });
 
-initVideoListeners({ updateVisibilityOfPlayerControlsButton });
+    if ((document.hidden && getPageType() == PageType.Video) || ([PageType.Video, PageType.Festival].includes(getPageType()))) {
+        document.addEventListener("visibilitychange", () => videoElementChange(true, getVideo()), { once: true });
+        window.addEventListener("mouseover", () => videoElementChange(true, getVideo()), { once: true });
+    }
 
-setupVideoModule({ videoIDChange, channelIDChange, resetValues, videoElementChange });
+    setupPageLoadingListener();
 
-// wait for hydration to complete
-waitFor(() => getPageLoaded(), 10000, 100).then(setupThumbnailListener);
+    initDanmakuSkip({
+        getVirtualTime,
+        isSegmentMarkedNearCurrentTime,
+        skipToTime,
+        openSubmissionMenu,
+    });
 
-setMessageNotice(false, getPageLoaded);
+    initHotkeyHandler({ startOrEndTimingNewSegment, submitSegments, openSubmissionMenu, previewRecentSegment });
 
-const playerButton = new PlayerButton(
-    startOrEndTimingNewSegment,
-    cancelCreatingSegment,
-    clearSponsorTimes,
-    openSubmissionMenu,
-    openInfoMenu
-);
+    initPreviewBarManager({ voteAsync, updateVisibilityOfPlayerControlsButton });
 
-export { getPageLoaded } from "./content/state";
+    initVideoListeners({ updateVisibilityOfPlayerControlsButton });
 
+    setupVideoModule({ videoIDChange, channelIDChange, resetValues, videoElementChange });
 
-addHotkeyListener();
+    // wait for hydration to complete
+    waitFor(() => getPageLoaded(), 10000, 100).then(setupThumbnailListener);
 
+    setMessageNotice(false, getPageLoaded);
 
-// Contains all of the functions and variables needed by the skip notice
-const skipNoticeContentContainer: ContentContainer = () => ({
-    vote,
-    dontShowNoticeAgain,
-    unskipSponsorTime,
-    sponsorTimes: contentState.sponsorTimes,
-    sponsorTimesSubmitting: contentState.sponsorTimesSubmitting,
-    skipNotices: contentState.skipNotices,
-    advanceSkipNotices: contentState.advanceSkipNotices,
-    sponsorVideoID: getVideoID(),
-    reskipSponsorTime,
-    updatePreviewBar,
-    sponsorSubmissionNotice: getSubmissionNotice(),
-    resetSponsorSubmissionNotice,
-    updateEditButtonsOnPlayer: updateSegmentSubmitting,
-    previewTime,
-    videoInfo: contentState.videoInfo,
-    getRealCurrentTime: getRealCurrentTime,
-    lockedCategories: contentState.lockedCategories,
-    channelIDInfo: getChannelIDInfo(),
-});
+    const playerButton = new PlayerButton(
+        startOrEndTimingNewSegment,
+        cancelCreatingSegment,
+        clearSponsorTimes,
+        openSubmissionMenu,
+        openInfoMenu
+    );
 
-initSegmentSubmission({
-    skipToTime,
-    startSponsorSchedule,
-    previewTime,
-    startSkipScheduleCheckingForStartSponsors,
-    updatePreviewBar,
-    selectSegment,
-    seekFrameByKeyPressListener,
-    playerButton,
-    skipNoticeContentContainer,
-});
+    addHotkeyListener();
 
-initSkipScheduler({
-    skipNoticeContentContainer,
-    updateActiveSegment,
-});
+    // Contains all of the functions and variables needed by the skip notice
+    const skipNoticeContentContainer: ContentContainer = () => ({
+        vote,
+        dontShowNoticeAgain,
+        unskipSponsorTime,
+        sponsorTimes: contentState.sponsorTimes,
+        sponsorTimesSubmitting: contentState.sponsorTimesSubmitting,
+        skipNotices: contentState.skipNotices,
+        advanceSkipNotices: contentState.advanceSkipNotices,
+        sponsorVideoID: getVideoID(),
+        reskipSponsorTime,
+        updatePreviewBar,
+        sponsorSubmissionNotice: getSubmissionNotice(),
+        resetSponsorSubmissionNotice,
+        updateEditButtonsOnPlayer: updateSegmentSubmitting,
+        previewTime,
+        videoInfo: contentState.videoInfo,
+        getRealCurrentTime: getRealCurrentTime,
+        lockedCategories: contentState.lockedCategories,
+        channelIDInfo: getChannelIDInfo(),
+    });
 
-initMessageHandler({
-    startOrEndTimingNewSegment,
-    isSegmentCreationInProgress,
-    closeInfoMenu,
-    openSubmissionMenu,
-    videoIDChange,
-    selectSegment,
-    vote,
-    updatePreviewBar,
-    updateSegmentSubmitting,
-    updateSponsorTimesSubmitting,
-    unskipSponsorTime,
-    reskipSponsorTime,
-    sponsorsLookup,
-    submitPortVideo,
-    portVideoVote,
-    updateSegments,
-    updateVisibilityOfPlayerControlsButton,
-    setCategoryColorCSSVariables,
-    utils,
-});
-setupMessageListener();
+    initSegmentSubmission({
+        skipToTime,
+        startSponsorSchedule,
+        previewTime,
+        startSkipScheduleCheckingForStartSponsors,
+        updatePreviewBar,
+        selectSegment,
+        seekFrameByKeyPressListener,
+        playerButton,
+        skipNoticeContentContainer,
+    });
+
+    initSkipScheduler({
+        skipNoticeContentContainer,
+        updateActiveSegment,
+    });
+
+    initMessageHandler({
+        startOrEndTimingNewSegment,
+        isSegmentCreationInProgress,
+        closeInfoMenu,
+        openSubmissionMenu,
+        videoIDChange,
+        selectSegment,
+        vote,
+        updatePreviewBar,
+        updateSegmentSubmitting,
+        updateSponsorTimesSubmitting,
+        unskipSponsorTime,
+        reskipSponsorTime,
+        sponsorsLookup,
+        submitPortVideo,
+        portVideoVote,
+        updateSegments,
+        updateVisibilityOfPlayerControlsButton,
+        setCategoryColorCSSVariables,
+        utils,
+    });
+    setupMessageListener();
+}
 
 function resetValues() {
     resetVideoListenerState();
@@ -290,8 +290,6 @@ async function videoIDChange(): Promise<void> {
     ) CommentListener();
 }
 
-
-
 //checks if this channel is whitelisted, should be done only after the channelID has been loaded
 async function channelIDChange(channelIDInfo: ChannelIDInfo) {
     const whitelistedChannels = Config.config.whitelistedChannels;
@@ -327,8 +325,6 @@ function videoElementChange(newVideo: boolean, video: HTMLVideoElement): void {
         setTimeout(checkPreviewbarState, 5000);
     });
 }
-
-export { seekFrameByKeyPressListener } from "./content/hotkeyHandler";
 
 // Generate and inject a stylesheet that creates CSS variables with configured category colors
 function setCategoryColorCSSVariables() {

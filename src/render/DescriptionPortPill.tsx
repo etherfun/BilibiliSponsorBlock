@@ -3,7 +3,7 @@ import { createRoot, Root } from "react-dom/client";
 import { DescriptionPortPillComponent } from "../components/DescriptionPortPillComponent";
 import YouTubeLogoButton from "../components/YouTubeLogoButton";
 import Config from "../config";
-import { getPageLoaded } from "../content";
+import { getPageLoaded } from "../content/state";
 import { FetchResponse } from "../requests/type/requestType";
 import { PortVideo, BVID } from "../types";
 import { waitFor } from "../utils/index";
