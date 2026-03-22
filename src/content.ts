@@ -85,6 +85,8 @@ import {
     setupVideoModule,
 } from "./utils/video";
 
+setupPageLoadingListener();
+
 detectPageType();
 
 const utils = new Utils();
@@ -114,8 +116,6 @@ function init(): void {
         document.addEventListener("visibilitychange", () => videoElementChange(true, getVideo()), { once: true });
         window.addEventListener("mouseover", () => videoElementChange(true, getVideo()), { once: true });
     }
-
-    setupPageLoadingListener();
 
     initDanmakuSkip({
         getVirtualTime,
