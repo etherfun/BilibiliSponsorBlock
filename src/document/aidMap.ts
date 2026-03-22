@@ -23,6 +23,10 @@ export async function getBvid(aid: number | string): Promise<BVID> {
     if (window?.__INITIAL_STATE__?.aid && window.__INITIAL_STATE__.bvid) {
         saveAid(window.__INITIAL_STATE__.aid, window.__INITIAL_STATE__.bvid);
     }
+    const manifest = window?.player?.getManifest()
+    if (manifest != null && manifest.aid != null && manifest.bvid != null) {
+        saveAid(manifest.aid, manifest.bvid);
+    }
     if (!cache.contains(aid as AID)) {
         let bvid: BVID;
         try {
