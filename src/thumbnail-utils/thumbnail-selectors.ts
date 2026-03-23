@@ -37,6 +37,7 @@ const thumbnailSelectors: { [key: string]: ThumbnailSelector } = {
         // 播放页推荐
         containerSelector: ".right-container",
         thumbnailSelector: ".video-page-card-small",
+        labelAnchorSelector: ".b-img img"
     },
     "listPlayerSideRecommendation": {
         // 列表播放页推荐
