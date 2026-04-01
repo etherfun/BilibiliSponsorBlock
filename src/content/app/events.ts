@@ -1,0 +1,25 @@
+export const CONTENT_EVENTS = {
+    APP_PAGE_READY: "app/pageReady",
+    VIDEO_RESET_REQUESTED: "video/resetRequested",
+    VIDEO_ID_CHANGED: "video/idChanged",
+    VIDEO_ELEMENT_CHANGED: "video/elementChanged",
+    VIDEO_CHANNEL_RESOLVED: "video/channelResolved",
+    CONFIG_CHANGED: "config/changed",
+    SEGMENTS_LOADED: "segments/loaded",
+    SEGMENTS_SUBMITTING_CHANGED: "segments/submittingChanged",
+    SKIP_EXECUTED: "skip/executed",
+    SKIP_NOTICE_REQUESTED: "skip/noticeRequested",
+    SKIP_BUTTON_STATE_CHANGED: "skip/buttonStateChanged",
+    PLAYER_TIME_UPDATED: "player/timeUpdated",
+    PLAYER_VIDEO_READY: "player/videoReady",
+    PLAYER_DURATION_CHANGED: "player/durationChanged",
+    PLAYER_PLAY: "player/play",
+    PLAYER_PLAYING: "player/playing",
+    PLAYER_SEEKING: "player/seeking",
+    PLAYER_PAUSE: "player/pause",
+    PLAYER_WAITING: "player/waiting",
+    PLAYER_RATE_CHANGED: "player/rateChanged",
+    UI_POPUP_CLOSED: "ui/popupClosed",
+} as const;
+
+export type ContentEventName = typeof CONTENT_EVENTS[keyof typeof CONTENT_EVENTS];

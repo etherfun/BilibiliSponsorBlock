@@ -9,6 +9,7 @@ import {
 } from "../types";
 import { sourceId } from "../utils/injectedScriptMessageUtils";
 import { getContentApp } from "./app";
+import { CONTENT_EVENTS } from "./app/events";
 import { ContentAppState } from "./app/types";
 
 export const skipBuffer = 0.003;
@@ -179,7 +180,7 @@ export function setupPageLoadingListener(): void {
         console.debug(`${TAG} Page ready (${reason}) at +${elapsed}ms`);
         contentState.pageLoaded = true;
         try {
-            getContentApp().bus.emit("app/pageReady", { pageLoaded: true }, { source: "content/state" });
+            getContentApp().bus.emit(CONTENT_EVENTS.APP_PAGE_READY, { pageLoaded: true }, { source: "content/state" });
         } catch (error) {
             // The app may not have finished bootstrapping yet.
         }

@@ -39,6 +39,7 @@ import { getBvID, getCid, getVideo, getVideoID, waitForVideo } from "../utils/vi
 import { parseBvidAndCidFromVideoId } from "../utils/videoIdUtils";
 import { openWarningDialog } from "../utils/warnings";
 import { getContentApp } from "./app";
+import { CONTENT_EVENTS } from "./app/events";
 import { seekFrameByKeyPressListener } from "./hotkeyHandler";
 import { getSkipNoticeContentContainer } from "./skipNoticeContentContainer";
 import { contentState, syncContentStateStore } from "./state";
@@ -76,7 +77,7 @@ function getPlayerButton(): PlayerButton {
 function emitSubmittingChanged(getFromConfig: boolean, source: string): void {
     syncContentStateStore(source);
     getContentApp().bus.emit(
-        "segments/submittingChanged",
+        CONTENT_EVENTS.SEGMENTS_SUBMITTING_CHANGED,
         {
             sponsorTimesSubmitting: contentState.sponsorTimesSubmitting,
             getFromConfig,
@@ -88,7 +89,7 @@ function emitSubmittingChanged(getFromConfig: boolean, source: string): void {
 function emitSegmentsLoaded(source: string): void {
     syncContentStateStore(source);
     getContentApp().bus.emit(
-        "segments/loaded",
+        CONTENT_EVENTS.SEGMENTS_LOADED,
         {
             sponsorTimes: contentState.sponsorTimes,
             status: contentState.lastResponseStatus,
@@ -553,7 +554,7 @@ export function closeInfoMenu(): void {
     popup.remove();
 
     window.dispatchEvent(new Event("closePopupMenu"));
-    getContentApp().bus.emit("ui/popupClosed", {}, { source: "segmentSubmission.closeInfoMenu" });
+    getContentApp().bus.emit(CONTENT_EVENTS.UI_POPUP_CLOSED, {}, { source: "segmentSubmission.closeInfoMenu" });
 }
 
 export function clearSponsorTimes(): void {

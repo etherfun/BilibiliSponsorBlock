@@ -23,6 +23,7 @@ import {
     VideoInfo,
     YTID,
 } from "../../types";
+import { CONTENT_EVENTS } from "./events";
 
 export interface ContentAppState {
     sponsorDataFound: boolean;
@@ -68,38 +69,38 @@ export interface ContentEventMeta {
 }
 
 export interface ContentEventMap {
-    "app/pageReady": { pageLoaded: boolean };
-    "video/resetRequested": { reason: string };
-    "video/idChanged": { videoID: NewVideoID | null };
-    "video/elementChanged": { newVideo: boolean; video: HTMLVideoElement | null };
-    "video/channelResolved": { channelIDInfo: ChannelIDInfo };
-    "config/changed": { changes: StorageChangesObject };
-    "segments/loaded": { sponsorTimes: SponsorTime[]; status: number };
-    "segments/submittingChanged": { sponsorTimesSubmitting: SponsorTime[]; getFromConfig: boolean };
-    "skip/executed": {
+    [CONTENT_EVENTS.APP_PAGE_READY]: { pageLoaded: boolean };
+    [CONTENT_EVENTS.VIDEO_RESET_REQUESTED]: { reason: string };
+    [CONTENT_EVENTS.VIDEO_ID_CHANGED]: { videoID: NewVideoID | null };
+    [CONTENT_EVENTS.VIDEO_ELEMENT_CHANGED]: { newVideo: boolean; video: HTMLVideoElement | null };
+    [CONTENT_EVENTS.VIDEO_CHANNEL_RESOLVED]: { channelIDInfo: ChannelIDInfo };
+    [CONTENT_EVENTS.CONFIG_CHANGED]: { changes: StorageChangesObject };
+    [CONTENT_EVENTS.SEGMENTS_LOADED]: { sponsorTimes: SponsorTime[]; status: number };
+    [CONTENT_EVENTS.SEGMENTS_SUBMITTING_CHANGED]: { sponsorTimesSubmitting: SponsorTime[]; getFromConfig: boolean };
+    [CONTENT_EVENTS.SKIP_EXECUTED]: {
         skipTime: [number, number];
         skippingSegments: SponsorTime[];
         autoSkip: boolean;
         openNotice: boolean;
         unskipTime?: number | null;
     };
-    "skip/noticeRequested": {
+    [CONTENT_EVENTS.SKIP_NOTICE_REQUESTED]: {
         skippingSegments: SponsorTime[];
         autoSkip: boolean;
         unskipTime?: number | null;
         startReskip: boolean;
     };
-    "skip/buttonStateChanged": { enabled: boolean; segment: SponsorTime | null; duration?: number };
-    "player/timeUpdated": { time: number };
-    "player/videoReady": { video: HTMLVideoElement };
-    "player/durationChanged": { video: HTMLVideoElement };
-    "player/play": { video: HTMLVideoElement };
-    "player/playing": { video: HTMLVideoElement };
-    "player/seeking": { video: HTMLVideoElement };
-    "player/pause": { video: HTMLVideoElement };
-    "player/waiting": { video: HTMLVideoElement };
-    "player/rateChanged": { video: HTMLVideoElement; playbackRate: number };
-    "ui/popupClosed": Record<string, never>;
+    [CONTENT_EVENTS.SKIP_BUTTON_STATE_CHANGED]: { enabled: boolean; segment: SponsorTime | null; duration?: number };
+    [CONTENT_EVENTS.PLAYER_TIME_UPDATED]: { time: number };
+    [CONTENT_EVENTS.PLAYER_VIDEO_READY]: { video: HTMLVideoElement };
+    [CONTENT_EVENTS.PLAYER_DURATION_CHANGED]: { video: HTMLVideoElement };
+    [CONTENT_EVENTS.PLAYER_PLAY]: { video: HTMLVideoElement };
+    [CONTENT_EVENTS.PLAYER_PLAYING]: { video: HTMLVideoElement };
+    [CONTENT_EVENTS.PLAYER_SEEKING]: { video: HTMLVideoElement };
+    [CONTENT_EVENTS.PLAYER_PAUSE]: { video: HTMLVideoElement };
+    [CONTENT_EVENTS.PLAYER_WAITING]: { video: HTMLVideoElement };
+    [CONTENT_EVENTS.PLAYER_RATE_CHANGED]: { video: HTMLVideoElement; playbackRate: number };
+    [CONTENT_EVENTS.UI_POPUP_CLOSED]: Record<string, never>;
 }
 
 export interface ContentCommandDefinition<Payload = void, Result = void> {

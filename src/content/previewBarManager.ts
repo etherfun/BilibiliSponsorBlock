@@ -10,6 +10,7 @@ import { getFormattedTime } from "../utils/formating";
 import { getHashParams } from "../utils/pageUtils";
 import { getVideo, getVideoID } from "../utils/video";
 import { getContentApp } from "./app";
+import { CONTENT_EVENTS } from "./app/events";
 import { contentState } from "./state";
 
 const utils = new Utils();
@@ -48,12 +49,12 @@ export function registerPreviewBarManager(): void {
     app.commands.register("ui/updateActiveSegment", ({ currentTime }) => updateActiveSegment(currentTime));
     app.commands.register("segments/select", ({ UUID }) => selectSegment(UUID));
 
-    app.bus.on("player/videoReady", () => {
+    app.bus.on(CONTENT_EVENTS.PLAYER_VIDEO_READY, () => {
         createPreviewBar();
         updatePreviewBar();
         void app.commands.execute("ui/updatePlayerButtons", undefined);
     });
-    app.bus.on("player/durationChanged", () => {
+    app.bus.on(CONTENT_EVENTS.PLAYER_DURATION_CHANGED, () => {
         updatePreviewBar();
     });
 }
@@ -170,7 +171,7 @@ export function updateActiveSegment(currentTime: number): void {
         message: "time",
         time: currentTime,
     });
-    getContentApp().bus.emit("player/timeUpdated", { time: currentTime }, { source: "previewBarManager" });
+    getContentApp().bus.emit(CONTENT_EVENTS.PLAYER_TIME_UPDATED, { time: currentTime }, { source: "previewBarManager" });
 }
 
 export function showTimeWithoutSkips(skippedDuration: number): void {

@@ -1,5 +1,6 @@
 import Config from "./config";
 import { createContentApp } from "./content/app";
+import { CONTENT_EVENTS } from "./content/app/events";
 import {
     getPreviewBar,
     registerPreviewBarManager,
@@ -66,14 +67,14 @@ function init(): void {
 
     if (!lifecycleRegistered) {
         lifecycleRegistered = true;
-        app.bus.on("video/resetRequested", () => resetValues());
-        app.bus.on("video/idChanged", () => {
+        app.bus.on(CONTENT_EVENTS.VIDEO_RESET_REQUESTED, () => resetValues());
+        app.bus.on(CONTENT_EVENTS.VIDEO_ID_CHANGED, () => {
             void videoIDChange();
         });
-        app.bus.on("video/channelResolved", ({ channelIDInfo }) => {
+        app.bus.on(CONTENT_EVENTS.VIDEO_CHANNEL_RESOLVED, ({ channelIDInfo }) => {
             void channelIDChange(channelIDInfo);
         });
-        app.bus.on("video/elementChanged", ({ newVideo, video }) => {
+        app.bus.on(CONTENT_EVENTS.VIDEO_ELEMENT_CHANGED, ({ newVideo, video }) => {
             videoElementChange(newVideo, video);
         });
     }

@@ -11,6 +11,7 @@ import { importTimes } from "../utils/exporter";
 import { getBilibiliVideoID } from "../utils/parseVideoID";
 import { checkVideoIDChange, getChannelIDInfo, getVideo, getVideoID } from "../utils/video";
 import { getContentApp } from "./app";
+import { CONTENT_EVENTS } from "./app/events";
 import { contentState, syncContentStateStore } from "./state";
 
 const utils = new Utils();
@@ -205,7 +206,7 @@ export function handleContentMessage(
 
 function contentConfigUpdateListener(changes: StorageChangesObject) {
     const app = getContentApp();
-    app.bus.emit("config/changed", { changes }, { source: "messageHandler.configSyncListener" });
+    app.bus.emit(CONTENT_EVENTS.CONFIG_CHANGED, { changes }, { source: "messageHandler.configSyncListener" });
 
     for (const key in changes) {
         switch (key) {

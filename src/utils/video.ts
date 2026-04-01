@@ -1,6 +1,7 @@
 import * as documentScript from "../../dist/js/document.js";
 import Config from "../config";
 import { getContentApp } from "../content/app";
+import { CONTENT_EVENTS } from "../content/app/events";
 import { checkPageForNewThumbnails } from "../thumbnail-utils/thumbnailManagement";
 import { BVID, CID, NewVideoID, PageType } from "../types";
 import { waitFor } from "./";
@@ -108,7 +109,7 @@ async function videoIDChange(id: NewVideoID | null): Promise<boolean> {
 
     // Refresh content even when ID didn't change (e.g. URL params removed) so segments/UI update
     if ([PageType.Festival, PageType.Anime].includes(getPageType())) {
-        getContentApp().bus.emit("video/idChanged", { videoID: id }, { source: "utils/video.videoIDChange.refresh" });
+        getContentApp().bus.emit(CONTENT_EVENTS.VIDEO_ID_CHANGED, { videoID: id }, { source: "utils/video.videoIDChange.refresh" });
     }
     //if the id has not changed return unless the video element has changed
     if (videoID === id && (isVisible(video) || !video)) return false;
@@ -130,13 +131,13 @@ async function videoIDChange(id: NewVideoID | null): Promise<boolean> {
     // Update whitelist data when the video data is loaded
     void whitelistCheck();
 
-    getContentApp().bus.emit("video/idChanged", { videoID: id }, { source: "utils/video.videoIDChange" });
+    getContentApp().bus.emit(CONTENT_EVENTS.VIDEO_ID_CHANGED, { videoID: id }, { source: "utils/video.videoIDChange" });
 
     return true;
 }
 
 function resetValues() {
-    getContentApp().bus.emit("video/resetRequested", { reason: "videoIDChange" }, { source: "utils/video.resetValues" });
+    getContentApp().bus.emit(CONTENT_EVENTS.VIDEO_RESET_REQUESTED, { reason: "videoIDChange" }, { source: "utils/video.resetValues" });
 
     videoID = null;
     pageType = PageType.Unknown;
@@ -197,7 +198,7 @@ export async function whitelistCheck() {
 
     waitingForChannelID = false;
     getContentApp().bus.emit(
-        "video/channelResolved",
+        CONTENT_EVENTS.VIDEO_CHANNEL_RESOLVED,
         { channelIDInfo },
         { source: "utils/video.whitelistCheck" }
     );
@@ -310,7 +311,7 @@ async function refreshVideoAttachments(): Promise<void> {
     }
 
     getContentApp().bus.emit(
-        "video/elementChanged",
+        CONTENT_EVENTS.VIDEO_ELEMENT_CHANGED,
         { newVideo: isNewVideo, video },
         { source: "utils/video.refreshVideoAttachments" }
     );

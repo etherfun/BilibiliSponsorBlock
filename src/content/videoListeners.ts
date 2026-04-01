@@ -3,6 +3,7 @@ import { addCleanupListener } from "../utils/cleanup";
 import { logDebug } from "../utils/logger";
 import { getVideoID } from "../utils/video";
 import { getContentApp } from "./app";
+import { CONTENT_EVENTS } from "./app/events";
 import { danmakuForSkip } from "./danmakuSkip";
 import { contentState } from "./state";
 
@@ -35,7 +36,7 @@ export function durationChangeListener(event?: Event): void {
     const video = (event?.target as HTMLVideoElement) || (document.querySelector("video") as HTMLVideoElement | null);
     if (!video) return;
 
-    getContentApp().bus.emit("player/durationChanged", { video }, { source: "videoListeners.durationChange" });
+    getContentApp().bus.emit(CONTENT_EVENTS.PLAYER_DURATION_CHANGED, { video }, { source: "videoListeners.durationChange" });
     void getContentApp().commands.execute("ui/updatePreviewBar", undefined);
 }
 
@@ -47,7 +48,7 @@ export function videoOnReadyListener(event?: Event): void {
     const video = (event?.target as HTMLVideoElement) || (document.querySelector("video") as HTMLVideoElement | null);
     if (!video) return;
 
-    getContentApp().bus.emit("player/videoReady", { video }, { source: "videoListeners.videoOnReady" });
+    getContentApp().bus.emit(CONTENT_EVENTS.PLAYER_VIDEO_READY, { video }, { source: "videoListeners.videoOnReady" });
     void getContentApp().commands.execute("ui/createPreviewBar", undefined);
     void getContentApp().commands.execute("ui/updatePreviewBar", undefined);
     void getContentApp().commands.execute("ui/updatePlayerButtons", undefined);
@@ -79,7 +80,7 @@ export function setupVideoListeners(video: HTMLVideoElement): void {
         const rateChangeListener = () => {
             void app.commands.execute("skip/updateVirtualTime", undefined);
             void app.commands.execute("skip/clearWaitingTime", undefined);
-            app.bus.emit("player/rateChanged", { video, playbackRate: video.playbackRate }, { source: "videoListeners.rateChange" });
+            app.bus.emit(CONTENT_EVENTS.PLAYER_RATE_CHANGED, { video, playbackRate: video.playbackRate }, { source: "videoListeners.rateChange" });
             void app.commands.execute("skip/startSchedule", {});
         };
         video.addEventListener("ratechange", rateChangeListener);
@@ -89,7 +90,7 @@ export function setupVideoListeners(video: HTMLVideoElement): void {
             if (video.readyState <= HTMLMediaElement.HAVE_CURRENT_DATA && video.currentTime === 0) return;
 
             void app.commands.execute("skip/updateVirtualTime", undefined);
-            app.bus.emit("player/play", { video }, { source: "videoListeners.play" });
+            app.bus.emit(CONTENT_EVENTS.PLAYER_PLAY, { video }, { source: "videoListeners.play" });
 
             if (contentState.switchingVideos || lastPausedAtZero) {
                 contentState.switchingVideos = false;
@@ -116,7 +117,7 @@ export function setupVideoListeners(video: HTMLVideoElement): void {
 
         const playingListener = () => {
             void app.commands.execute("skip/updateVirtualTime", undefined);
-            app.bus.emit("player/playing", { video }, { source: "videoListeners.playing" });
+            app.bus.emit(CONTENT_EVENTS.PLAYER_PLAYING, { video }, { source: "videoListeners.playing" });
             lastPausedAtZero = false;
 
             if (startedWaiting) {
@@ -169,7 +170,7 @@ export function setupVideoListeners(video: HTMLVideoElement): void {
 
         const seekingListener = () => {
             getLastKnownVideoTime().fromPause = false;
-            app.bus.emit("player/seeking", { video }, { source: "videoListeners.seeking" });
+            app.bus.emit(CONTENT_EVENTS.PLAYER_SEEKING, { video }, { source: "videoListeners.seeking" });
 
             if (!video.paused) {
                 lastCheckTime = Date.now();
@@ -213,7 +214,7 @@ export function setupVideoListeners(video: HTMLVideoElement): void {
         };
         const pauseListener = () => {
             getLastKnownVideoTime().fromPause = true;
-            app.bus.emit("player/pause", { video }, { source: "videoListeners.pause" });
+            app.bus.emit(CONTENT_EVENTS.PLAYER_PAUSE, { video }, { source: "videoListeners.pause" });
 
             stoppedPlayback();
         };
@@ -221,7 +222,7 @@ export function setupVideoListeners(video: HTMLVideoElement): void {
         const waitingListener = () => {
             logDebug("[SB] Not skipping due to buffering");
             startedWaiting = true;
-            app.bus.emit("player/waiting", { video }, { source: "videoListeners.waiting" });
+            app.bus.emit(CONTENT_EVENTS.PLAYER_WAITING, { video }, { source: "videoListeners.waiting" });
 
             stoppedPlayback();
         };
