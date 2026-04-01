@@ -1,75 +1,46 @@
 import Config from "../config";
 import { StorageChangesObject } from "../config/config";
-import { Message, MessageResponse, VoteResponse } from "../messageTypes";
+import { Message, MessageResponse } from "../messageTypes";
 import { checkPageForNewThumbnails } from "../thumbnail-utils/thumbnailManagement";
 import {
     ActionType,
-    Category,
-    PortVideo,
-    SegmentUUID,
     SponsorHideType,
-    SponsorTime,
-    YTID,
 } from "../types";
 import Utils from "../utils";
 import { importTimes } from "../utils/exporter";
 import { getBilibiliVideoID } from "../utils/parseVideoID";
 import { checkVideoIDChange, getChannelIDInfo, getVideo, getVideoID } from "../utils/video";
-import { getPopupInitialised, getSkipButtonControlBar, setPopupInitialised } from "./segmentSubmission";
-import { contentState } from "./state";
+import { getContentApp } from "./app";
+import { contentState, syncContentStateStore } from "./state";
 
-export interface MessageHandlerDeps {
-    startOrEndTimingNewSegment: () => void;
-    isSegmentCreationInProgress: () => boolean;
-    closeInfoMenu: () => void;
-    openSubmissionMenu: () => void;
-    videoIDChange: () => Promise<void>;
-    selectSegment: (UUID: SegmentUUID) => void;
-    vote: (type: number, UUID: SegmentUUID, category?: Category) => Promise<VoteResponse>;
-    updatePreviewBar: () => void;
-    updateSegmentSubmitting: () => void;
-    updateSponsorTimesSubmitting: (getFromConfig?: boolean) => void;
-    unskipSponsorTime: (segment: SponsorTime, unskipTime?: number, forceSeek?: boolean) => void;
-    reskipSponsorTime: (segment: SponsorTime, forceSeek?: boolean) => void;
-    sponsorsLookup: (keepOldSubmissions?: boolean, ignoreServerCache?: boolean, forceUpdatePreviewBar?: boolean) => void;
-    submitPortVideo: (ytbID: YTID) => Promise<PortVideo>;
-    portVideoVote: (UUID: string, vote: number) => void;
-    updateSegments: (UUID: string) => void;
-    updateVisibilityOfPlayerControlsButton: () => void;
-    setCategoryColorCSSVariables: () => void;
-    utils: Utils;
-}
-
-let deps: MessageHandlerDeps;
-
-export function initMessageHandler(dependencies: MessageHandlerDeps): void {
-    deps = dependencies;
-}
+const utils = new Utils();
 
 export function setupMessageListener(): void {
-    chrome.runtime.onMessage.addListener(messageListener);
+    chrome.runtime.onMessage.addListener(handleContentMessage);
     if (!Config.configSyncListeners.includes(contentConfigUpdateListener)) {
         Config.configSyncListeners.push(contentConfigUpdateListener);
     }
 }
 
-function messageListener(
+export function handleContentMessage(
     request: Message,
     sender: unknown,
     sendResponse: (response: MessageResponse) => void
 ): void | boolean {
+    const app = getContentApp();
+    const uiState = app.ui.getState();
     switch (request.message) {
         case "update":
             checkVideoIDChange();
             break;
         case "sponsorStart":
-            deps.startOrEndTimingNewSegment();
+            void app.commands.execute("segment/toggleCapture", undefined);
 
             sendResponse({
-                creatingSegment: deps.isSegmentCreationInProgress(),
+                creatingSegment: app.commands.execute("segment/isCreationInProgress", undefined) as boolean,
             });
 
-            break;
+            return;
         case "isInfoFound":
             if (!contentState.lastResponseStatus) return;
 
@@ -83,20 +54,23 @@ function messageListener(
 
             if (
                 !request.updating &&
-                getPopupInitialised() &&
+                uiState.popupInitialised &&
                 document.getElementById("sponsorBlockPopupContainer") != null
             ) {
-                deps.closeInfoMenu();
+                void app.commands.execute("popup/closeInfoMenu", undefined);
             }
 
-            setPopupInitialised(true);
-            break;
+            app.ui.patchState({ popupInitialised: true });
+            return;
         case "getVideoID":
             (async () => {
                 let id = getVideoID();
                 if (!id) {
                     id = await getBilibiliVideoID();
-                    if (id) await deps.videoIDChange();
+                    if (id) {
+                        await checkVideoIDChange();
+                    }
+                    id = getVideoID();
                 }
                 return {
                     videoID: id,
@@ -112,7 +86,7 @@ function messageListener(
                 channelID: getChannelIDInfo().id,
             });
 
-            break;
+            return;
         case "getChannelInfo":
             {
                 const channelID = getChannelIDInfo().id;
@@ -128,20 +102,21 @@ function messageListener(
                     channelName,
                 });
             }
-            break;
+            return;
         case "isChannelWhitelisted":
             sendResponse({
                 value: contentState.channelWhitelisted,
             });
 
-            break;
+            return;
         case "whitelistChange":
             contentState.channelWhitelisted = request.value;
-            deps.sponsorsLookup();
+            syncContentStateStore("messageHandler.whitelistChange");
+            void app.commands.execute("segments/lookup", {});
 
             break;
         case "submitTimes":
-            deps.openSubmissionMenu();
+            void app.commands.execute("segment/openSubmissionMenu", undefined);
             break;
         case "refreshSegments":
             if (!getVideoID()) {
@@ -149,77 +124,56 @@ function messageListener(
             }
 
             sendResponse({ hasVideo: getVideoID() != null });
-            deps.sponsorsLookup(false, true);
+            void app.commands.execute("segments/lookup", { keepOldSubmissions: false, ignoreServerCache: true });
 
-            break;
+            return;
         case "unskip":
-            deps.unskipSponsorTime(
-                contentState.sponsorTimes.find((segment) => segment.UUID === request.UUID),
-                null,
-                true
-            );
+            void app.commands.execute("skip/unskip", {
+                segment: contentState.sponsorTimes.find((segment) => segment.UUID === request.UUID),
+                unskipTime: null,
+                forceSeek: true,
+            });
             break;
         case "reskip":
-            deps.reskipSponsorTime(
-                contentState.sponsorTimes.find((segment) => segment.UUID === request.UUID),
-                true
-            );
+            void app.commands.execute("skip/reskip", {
+                segment: contentState.sponsorTimes.find((segment) => segment.UUID === request.UUID),
+                forceSeek: true,
+            });
             break;
         case "selectSegment":
-            deps.selectSegment(request.UUID);
+            void app.commands.execute("segments/select", { UUID: request.UUID });
             break;
         case "submitVote":
-            deps.vote(request.type, request.UUID).then(sendResponse);
+            Promise.resolve(app.commands.execute("segment/vote", { type: request.type, UUID: request.UUID })).then(sendResponse);
             return true;
         case "hideSegment":
-            deps.utils.getSponsorTimeFromUUID(contentState.sponsorTimes, request.UUID).hidden = request.type;
-            deps.utils.addHiddenSegment(getVideoID(), request.UUID, request.type);
-            deps.updatePreviewBar();
+            utils.getSponsorTimeFromUUID(contentState.sponsorTimes, request.UUID).hidden = request.type;
+            utils.addHiddenSegment(getVideoID(), request.UUID, request.type);
+            void app.commands.execute("ui/updatePreviewBar", undefined);
 
             if (
-                getSkipButtonControlBar()?.isEnabled() &&
+                uiState.skipButtonControlBar?.isEnabled() &&
                 contentState.sponsorTimesSubmitting.every(
                     (s) => s.hidden !== SponsorHideType.Visible || s.actionType !== ActionType.Poi
                 )
             ) {
-                getSkipButtonControlBar().disable();
+                uiState.skipButtonControlBar.disable();
             }
             break;
         case "closePopup":
-            deps.closeInfoMenu();
+            void app.commands.execute("popup/closeInfoMenu", undefined);
             break;
         case "copyToClipboard":
             navigator.clipboard.writeText(request.text);
             break;
         case "importSegments": {
             const importedSegments = importTimes(request.data, getVideo().duration);
-            let addedSegments = false;
-            for (const segment of importedSegments) {
-                if (
-                    !contentState.sponsorTimesSubmitting.some(
-                        (s) =>
-                            Math.abs(s.segment[0] - segment.segment[0]) < 1 &&
-                            Math.abs(s.segment[1] - segment.segment[1]) < 1
-                    )
-                ) {
-                    contentState.sponsorTimesSubmitting.push(segment);
-                    addedSegments = true;
-                }
-            }
-
-            if (addedSegments) {
-                Config.local.unsubmittedSegments[getVideoID()] = contentState.sponsorTimesSubmitting;
-                Config.forceLocalUpdate("unsubmittedSegments");
-
-                deps.updateSegmentSubmitting();
-                deps.updateSponsorTimesSubmitting(false);
-                deps.openSubmissionMenu();
-            }
+            void app.commands.execute("segments/import", { importedSegments });
 
             sendResponse({
                 importedSegments,
             });
-            break;
+            return;
         }
         case "keydown":
             (document.body || document).dispatchEvent(
@@ -236,13 +190,13 @@ function messageListener(
             );
             break;
         case "submitPortVideo":
-            deps.submitPortVideo(request.ytbID);
+            void app.commands.execute("port/submitVideo", { ytbID: request.ytbID });
             break;
         case "votePortVideo":
-            deps.portVideoVote(request.UUID, request.vote);
+            void app.commands.execute("port/voteVideo", { UUID: request.UUID, vote: request.vote });
             break;
         case "updatePortedSegments":
-            deps.updateSegments(request.UUID);
+            void app.commands.execute("port/updateSegments", { UUID: request.UUID });
             break;
     }
 
@@ -250,18 +204,21 @@ function messageListener(
 }
 
 function contentConfigUpdateListener(changes: StorageChangesObject) {
+    const app = getContentApp();
+    app.bus.emit("config/changed", { changes }, { source: "messageHandler.configSyncListener" });
+
     for (const key in changes) {
         switch (key) {
             case "hideVideoPlayerControls":
             case "hideInfoButtonPlayerControls":
             case "hideDeleteButtonPlayerControls":
-                deps.updateVisibilityOfPlayerControlsButton();
+                void app.commands.execute("ui/updatePlayerButtons", undefined);
                 break;
             case "categorySelections":
-                deps.sponsorsLookup();
+                void app.commands.execute("segments/lookup", {});
                 break;
             case "barTypes":
-                deps.setCategoryColorCSSVariables();
+                void app.commands.execute("config/applyCategoryColors", undefined);
                 break;
             case "fullVideoSegments":
             case "fullVideoLabelsOnThumbnails":

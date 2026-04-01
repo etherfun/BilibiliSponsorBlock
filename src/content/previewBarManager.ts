@@ -9,40 +9,58 @@ import { findValidElement } from "../utils/dom";
 import { getFormattedTime } from "../utils/formating";
 import { getHashParams } from "../utils/pageUtils";
 import { getVideo, getVideoID } from "../utils/video";
+import { getContentApp } from "./app";
 import { contentState } from "./state";
 
 const utils = new Utils();
 
-// --- Module-private state (formerly on contentState) ---
-let previewBar: PreviewBar = null;
-let selectedSegment: SegmentUUID | null = null;
-let lastPreviewBarUpdate: BVID;
-
-export function getPreviewBar() { return previewBar; }
-export function getLastPreviewBarUpdate() { return lastPreviewBarUpdate; }
-
-export function resetPreviewBarState(): void {
-    if (previewBar) {
-        previewBar.remove();
-        previewBar = null;
-    }
-    selectedSegment = null;
+function getPreviewBarState() {
+    return getContentApp().ui.getState();
 }
 
-let _voteAsync: (type: number, UUID: SegmentUUID, category?: Category) => Promise<VoteResponse | undefined>;
-let _updateVisibilityOfPlayerControlsButton: () => Promise<void>;
+export function getPreviewBar() { return getPreviewBarState().previewBar; }
+export function getLastPreviewBarUpdate() { return getPreviewBarState().lastPreviewBarUpdate; }
 
-export function initPreviewBarManager(deps: {
-    voteAsync: (type: number, UUID: SegmentUUID, category?: Category) => Promise<VoteResponse | undefined>;
-    updateVisibilityOfPlayerControlsButton: () => Promise<void>;
-}): void {
-    _voteAsync = deps.voteAsync;
-    _updateVisibilityOfPlayerControlsButton = deps.updateVisibilityOfPlayerControlsButton;
+export function resetPreviewBarState(): void {
+    const { previewBar } = getPreviewBarState();
+    if (previewBar) {
+        previewBar.remove();
+    }
+    getContentApp().ui.patchState({
+        previewBar: null,
+        selectedSegment: null,
+        lastPreviewBarUpdate: null,
+    });
 }
 
 export const durationID = "sponsorBlockDurationAfterSkips";
 
+function voteAsync(type: number, UUID: SegmentUUID, category?: Category): Promise<VoteResponse | undefined> {
+    return Promise.resolve(getContentApp().commands.execute("segment/voteAsync", { type, UUID, category }));
+}
+
+export function registerPreviewBarManager(): void {
+    const app = getContentApp();
+
+    app.commands.register("ui/createPreviewBar", () => createPreviewBar());
+    app.commands.register("ui/updatePreviewBar", () => updatePreviewBar());
+    app.commands.register("ui/checkPreviewBarState", () => checkPreviewbarState());
+    app.commands.register("ui/updateActiveSegment", ({ currentTime }) => updateActiveSegment(currentTime));
+    app.commands.register("segments/select", ({ UUID }) => selectSegment(UUID));
+
+    app.bus.on("player/videoReady", () => {
+        createPreviewBar();
+        updatePreviewBar();
+        void app.commands.execute("ui/updatePlayerButtons", undefined);
+    });
+    app.bus.on("player/durationChanged", () => {
+        updatePreviewBar();
+    });
+}
+
 export function createPreviewBar(): void {
+    const app = getContentApp();
+    const { previewBar } = app.ui.getState();
     if (previewBar !== null) return;
 
     const progressElementOptions = [
@@ -60,8 +78,9 @@ export function createPreviewBar(): void {
         const shadowParent = allshadowSelectorElements[0];
 
         if (parent) {
-            const chapterVote = new ChapterVote(_voteAsync);
-            previewBar = new PreviewBar(parent, shadowParent, chapterVote);
+            const chapterVote = new ChapterVote(voteAsync);
+            const nextPreviewBar = new PreviewBar(parent, shadowParent, chapterVote);
+            app.ui.patchState({ previewBar: nextPreviewBar });
             updatePreviewBar();
             break;
         }
@@ -69,6 +88,8 @@ export function createPreviewBar(): void {
 }
 
 export function updatePreviewBar(): void {
+    const app = getContentApp();
+    const { previewBar, selectedSegment } = app.ui.getState();
     if (previewBar === null) return;
     if (getVideo() === null) return;
 
@@ -110,7 +131,7 @@ export function updatePreviewBar(): void {
     );
     if (getVideo()) updateActiveSegment(getVideo().currentTime);
 
-    _updateVisibilityOfPlayerControlsButton();
+    void app.commands.execute("ui/updatePlayerButtons", undefined);
 
     removeDurationAfterSkip();
     if (Config.config.showTimeWithSkips) {
@@ -121,13 +142,15 @@ export function updatePreviewBar(): void {
         showTimeWithoutSkips(skippedDuration);
     }
 
-    lastPreviewBarUpdate = getVideoID();
+    app.ui.patchState({ lastPreviewBarUpdate: getVideoID() as BVID });
 }
 
 export function checkPreviewbarState(): void {
+    const app = getContentApp();
+    const { previewBar } = app.ui.getState();
     if (previewBar && !utils.findReferenceNode()?.contains(previewBar.container)) {
         previewBar.remove();
-        previewBar = null;
+        app.ui.patchState({ previewBar: null });
         removeDurationAfterSkip();
     }
 
@@ -135,17 +158,19 @@ export function checkPreviewbarState(): void {
 }
 
 export function selectSegment(UUID: SegmentUUID): void {
-    selectedSegment = UUID;
+    getContentApp().ui.patchState({ selectedSegment: UUID });
     updatePreviewBar();
 }
 
 export function updateActiveSegment(currentTime: number): void {
+    const { previewBar } = getContentApp().ui.getState();
     previewBar?.updateChapterText(contentState.sponsorTimes, contentState.sponsorTimesSubmitting, currentTime);
 
     chrome.runtime.sendMessage({
         message: "time",
         time: currentTime,
     });
+    getContentApp().bus.emit("player/timeUpdated", { time: currentTime }, { source: "previewBarManager" });
 }
 
 export function showTimeWithoutSkips(skippedDuration: number): void {

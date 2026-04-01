@@ -1,5 +1,4 @@
 import Config from "../config";
-import { ContentContainer } from "../ContentContainerTypes";
 import advanceSkipNotice from "../render/advanceSkipNotice";
 import SkipNotice from "../render/SkipNotice";
 import { asyncRequestToServer } from "../requests/requests";
@@ -27,7 +26,8 @@ import {
     getVideo,
     getVideoID,
 } from "../utils/video";
-import { getCategoryPill, getSkipButtonControlBar } from "./segmentSubmission";
+import { getContentApp } from "./app";
+import { getSkipNoticeContentContainer } from "./skipNoticeContentContainer";
 import {
     contentState,
     endTimeSkipBuffer,
@@ -82,15 +82,35 @@ export function resetSchedulerState(): void {
     sponsorSkipped = [];
 }
 
-export interface SkipSchedulerDeps {
-    skipNoticeContentContainer: ContentContainer;
-    updateActiveSegment: (currentTime: number) => void;
+function getCategoryPill() {
+    return getContentApp().ui.getState().categoryPill;
 }
 
-let deps: SkipSchedulerDeps;
+function getSkipButtonControlBar() {
+    return getContentApp().ui.getState().skipButtonControlBar;
+}
 
-export function initSkipScheduler(d: SkipSchedulerDeps): void {
-    deps = d;
+export function registerSkipScheduler(): void {
+    const app = getContentApp();
+
+    app.commands.register("skip/startSchedule", ({ includeIntersectingSegments, currentTime, includeNonIntersectingSegments }) =>
+        startSponsorSchedule(includeIntersectingSegments, currentTime, includeNonIntersectingSegments)
+    );
+    app.commands.register("skip/checkStartSponsors", () => startSkipScheduleCheckingForStartSponsors());
+    app.commands.register("skip/unskip", ({ segment, unskipTime, forceSeek }) => unskipSponsorTime(segment, unskipTime, forceSeek));
+    app.commands.register("skip/reskip", ({ segment, forceSeek }) => reskipSponsorTime(segment, forceSeek));
+    app.commands.register("skip/execute", (payload) => skipToTime(payload));
+    app.commands.register("skip/previewTime", ({ time, unpause }) => previewTime(time, unpause));
+    app.commands.register("skip/updateVirtualTime", () => updateVirtualTime());
+    app.commands.register("skip/updateWaitingTime", () => updateWaitingTime());
+    app.commands.register("skip/clearWaitingTime", () => clearWaitingTime());
+    app.commands.register("skip/cancelSchedule", () => cancelSponsorSchedule());
+    app.commands.register("skip/getVirtualTime", () => getVirtualTime());
+    app.commands.register("skip/getLastKnownVideoTime", () => getLastKnownVideoTime());
+    app.commands.register("skip/getSponsorSkipped", () => getSponsorSkipped());
+    app.commands.register("skip/isSegmentMarkedNearCurrentTime", ({ currentTime, range }) =>
+        isSegmentMarkedNearCurrentTime(currentTime, range)
+    );
 }
 
 export function cancelSponsorSchedule(): void {
@@ -135,7 +155,7 @@ export async function startSponsorSchedule(
     }
     clearWaitingTime();
 
-    deps.updateActiveSegment(currentTime);
+    void getContentApp().commands.execute("ui/updateActiveSegment", { currentTime });
 
     if (video.paused || (video.currentTime >= video.duration - 0.01 && video.duration > 1)) return;
     const skipInfo = getNextSkipIndex(currentTime, includeIntersectingSegments, includeNonIntersectingSegments);
@@ -923,7 +943,7 @@ export function createSkipNotice(
     const newSkipNotice = new SkipNotice(
         skippingSegments,
         autoSkip,
-        deps.skipNoticeContentContainer,
+        getSkipNoticeContentContainer,
         () => {
             contentState.advanceSkipNotices?.close();
             contentState.advanceSkipNotices = null;
@@ -952,7 +972,7 @@ export function createAdvanceSkipNotice(
     contentState.advanceSkipNotices?.close();
     contentState.advanceSkipNotices = new advanceSkipNotice(
         skippingSegments,
-        deps.skipNoticeContentContainer,
+        getSkipNoticeContentContainer,
         unskipTime,
         autoSkip,
         startReskip

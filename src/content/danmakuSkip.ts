@@ -4,7 +4,6 @@ import {
     ActionType,
     Category,
     SegmentUUID,
-    SkipToTimeParams,
     SponsorSourceType,
     SponsorTime,
 } from "../types";
@@ -12,33 +11,27 @@ import { addCleanupListener } from "../utils/cleanup";
 import { parseTargetTimeFromDanmaku } from "../utils/danmakusUtils";
 import { getCid, getVideo } from "../utils/video";
 import { generateUserID } from "../utils/setup";
-
-export interface DanmakuSkipDeps {
-    getVirtualTime: () => number;
-    isSegmentMarkedNearCurrentTime: (currentTime: number, range?: number) => boolean;
-    skipToTime: (params: SkipToTimeParams) => void;
-    openSubmissionMenu: () => void;
-}
+import { getContentApp } from "./app";
 
 let danmakuObserver: MutationObserver = null;
 const processedDanmaku = new Set<string>();
 
-let deps: DanmakuSkipDeps;
-
-export function initDanmakuSkip(d: DanmakuSkipDeps): void {
-    deps = d;
-}
-
 function checkDanmaku(text: string, offset: number) {
-    const targetTime = parseTargetTimeFromDanmaku(text, deps.getVirtualTime());
+    const getVirtualTime = () => getContentApp().commands.execute("skip/getVirtualTime", undefined) as number;
+    const targetTime = parseTargetTimeFromDanmaku(text, getVirtualTime());
     if (targetTime === null) return;
 
-    const startTime = deps.getVirtualTime() + offset;
+    const startTime = getVirtualTime() + offset;
 
     if (targetTime < startTime + 5) return;
     if (targetTime > getVideo().duration) return;
 
-    if (Config.config.checkTimeDanmakuSkip && deps.isSegmentMarkedNearCurrentTime(startTime)) return;
+    if (
+        Config.config.checkTimeDanmakuSkip &&
+        (getContentApp().commands.execute("skip/isSegmentMarkedNearCurrentTime", { currentTime: startTime }) as boolean)
+    ) {
+        return;
+    }
 
     const skippingSegments: SponsorTime[] = [
         {
@@ -52,7 +45,7 @@ function checkDanmaku(text: string, offset: number) {
     ];
 
     setTimeout(() => {
-        deps.skipToTime({
+        void getContentApp().commands.execute("skip/execute", {
             v: getVideo(),
             skipTime: [startTime, targetTime],
             skippingSegments,
@@ -65,7 +58,7 @@ function checkDanmaku(text: string, offset: number) {
                 if (!contentState.sponsorTimesSubmitting?.some((s) => s.segment[1] === skippingSegments[0].segment[1])) {
                     contentState.sponsorTimesSubmitting.push(skippingSegments[0]);
                 }
-                deps.openSubmissionMenu();
+                void getContentApp().commands.execute("segment/openSubmissionMenu", undefined);
             }, Config.config.skipNoticeDuration * 1000 + 500);
         }
     }, offset * 1000 - 100);

@@ -1,5 +1,6 @@
 import * as documentScript from "../../dist/js/document.js";
 import Config from "../config";
+import { getContentApp } from "../content/app";
 import { checkPageForNewThumbnails } from "../thumbnail-utils/thumbnailManagement";
 import { BVID, CID, NewVideoID, PageType } from "../types";
 import { waitFor } from "./";
@@ -36,17 +37,7 @@ let channelIDInfo: ChannelIDInfo;
 let waitingForChannelID = false;
 let frameRate: number = 30;
 
-interface contentMethodType {
-    videoIDChange: () => void;
-    channelIDChange: (channelIDInfo: ChannelIDInfo) => void;
-    resetValues: () => void;
-    videoElementChange?: (newVideo: boolean, video: HTMLVideoElement | null) => void;
-}
-
-let contentMethod: contentMethodType;
-
-export function setupVideoModule(method: contentMethodType) {
-    contentMethod = method;
+export function setupVideoModule() {
     setupCleanupListener();
 
     // Direct Links after the config is loaded
@@ -116,7 +107,9 @@ async function videoIDChange(id: NewVideoID | null): Promise<boolean> {
     }
 
     // Refresh content even when ID didn't change (e.g. URL params removed) so segments/UI update
-    if ([PageType.Festival, PageType.Anime].includes(getPageType())) contentMethod.videoIDChange();
+    if ([PageType.Festival, PageType.Anime].includes(getPageType())) {
+        getContentApp().bus.emit("video/idChanged", { videoID: id }, { source: "utils/video.videoIDChange.refresh" });
+    }
     //if the id has not changed return unless the video element has changed
     if (videoID === id && (isVisible(video) || !video)) return false;
 
@@ -137,13 +130,13 @@ async function videoIDChange(id: NewVideoID | null): Promise<boolean> {
     // Update whitelist data when the video data is loaded
     void whitelistCheck();
 
-    contentMethod.videoIDChange();
+    getContentApp().bus.emit("video/idChanged", { videoID: id }, { source: "utils/video.videoIDChange" });
 
     return true;
 }
 
 function resetValues() {
-    contentMethod.resetValues();
+    getContentApp().bus.emit("video/resetRequested", { reason: "videoIDChange" }, { source: "utils/video.resetValues" });
 
     videoID = null;
     pageType = PageType.Unknown;
@@ -203,7 +196,11 @@ export async function whitelistCheck() {
     }
 
     waitingForChannelID = false;
-    contentMethod.channelIDChange(channelIDInfo);
+    getContentApp().bus.emit(
+        "video/channelResolved",
+        { channelIDInfo },
+        { source: "utils/video.whitelistCheck" }
+    );
 }
 
 export function detectPageType(): PageType {
@@ -312,7 +309,11 @@ async function refreshVideoAttachments(): Promise<void> {
         videosSetup.push(video);
     }
 
-    contentMethod.videoElementChange(isNewVideo, video);
+    getContentApp().bus.emit(
+        "video/elementChanged",
+        { newVideo: isNewVideo, video },
+        { source: "utils/video.refreshVideoAttachments" }
+    );
     waitingForVideoListeners.forEach((l) => l(newVideo));
     waitingForVideoListeners.length = 0;
 

@@ -8,6 +8,8 @@ import {
     VideoInfo,
 } from "../types";
 import { sourceId } from "../utils/injectedScriptMessageUtils";
+import { getContentApp } from "./app";
+import { ContentAppState } from "./app/types";
 
 export const skipBuffer = 0.003;
 export const endTimeSkipBuffer = 0.5;
@@ -35,6 +37,34 @@ let lastResponseStatus: number;
 
 let pageLoaded = false;
 
+function buildContentStateSnapshot(): ContentAppState {
+    return {
+        sponsorDataFound,
+        sponsorTimes,
+        skipNotices,
+        advanceSkipNotices: advanceSkipNoticesVar,
+        activeSkipKeybindElement,
+        shownSegmentFailedToFetchWarning,
+        previewedSegment,
+        portVideo,
+        videoInfo,
+        lockedCategories,
+        switchingVideos,
+        channelWhitelisted,
+        sponsorTimesSubmitting,
+        lastResponseStatus: lastResponseStatus ?? 0,
+        pageLoaded,
+    };
+}
+
+export function syncContentStateStore(source = "content/state"): void {
+    try {
+        getContentApp().store.replaceState(buildContentStateSnapshot(), source);
+    } catch (error) {
+        // The app is not ready during early module evaluation.
+    }
+}
+
 /**
  * Shared mutable state for content script modules.
  *
@@ -44,48 +74,90 @@ let pageLoaded = false;
  */
 export const contentState = {
     get sponsorDataFound() { return sponsorDataFound; },
-    set sponsorDataFound(v: boolean) { sponsorDataFound = v; },
+    set sponsorDataFound(v: boolean) {
+        sponsorDataFound = v;
+        syncContentStateStore("contentState.sponsorDataFound");
+    },
 
     get sponsorTimes() { return sponsorTimes; },
-    set sponsorTimes(v: SponsorTime[]) { sponsorTimes = v; },
+    set sponsorTimes(v: SponsorTime[]) {
+        sponsorTimes = v;
+        syncContentStateStore("contentState.sponsorTimes");
+    },
 
     get skipNotices() { return skipNotices; },
 
     get advanceSkipNotices() { return advanceSkipNoticesVar; },
-    set advanceSkipNotices(v: advanceSkipNotice | null) { advanceSkipNoticesVar = v; },
+    set advanceSkipNotices(v: advanceSkipNotice | null) {
+        advanceSkipNoticesVar = v;
+        syncContentStateStore("contentState.advanceSkipNotices");
+    },
 
     get activeSkipKeybindElement() { return activeSkipKeybindElement; },
-    set activeSkipKeybindElement(v: ToggleSkippable) { activeSkipKeybindElement = v; },
+    set activeSkipKeybindElement(v: ToggleSkippable) {
+        activeSkipKeybindElement = v;
+        syncContentStateStore("contentState.activeSkipKeybindElement");
+    },
 
     get shownSegmentFailedToFetchWarning() { return shownSegmentFailedToFetchWarning; },
-    set shownSegmentFailedToFetchWarning(v: boolean) { shownSegmentFailedToFetchWarning = v; },
+    set shownSegmentFailedToFetchWarning(v: boolean) {
+        shownSegmentFailedToFetchWarning = v;
+        syncContentStateStore("contentState.shownSegmentFailedToFetchWarning");
+    },
 
     get previewedSegment() { return previewedSegment; },
-    set previewedSegment(v: boolean) { previewedSegment = v; },
+    set previewedSegment(v: boolean) {
+        previewedSegment = v;
+        syncContentStateStore("contentState.previewedSegment");
+    },
 
     get portVideo() { return portVideo; },
-    set portVideo(v: PortVideo) { portVideo = v; },
+    set portVideo(v: PortVideo) {
+        portVideo = v;
+        syncContentStateStore("contentState.portVideo");
+    },
 
     get videoInfo() { return videoInfo; },
-    set videoInfo(v: VideoInfo) { videoInfo = v; },
+    set videoInfo(v: VideoInfo) {
+        videoInfo = v;
+        syncContentStateStore("contentState.videoInfo");
+    },
 
     get lockedCategories() { return lockedCategories; },
-    set lockedCategories(v: Category[]) { lockedCategories = v; },
+    set lockedCategories(v: Category[]) {
+        lockedCategories = v;
+        syncContentStateStore("contentState.lockedCategories");
+    },
 
     get switchingVideos() { return switchingVideos; },
-    set switchingVideos(v) { switchingVideos = v; },
+    set switchingVideos(v) {
+        switchingVideos = v;
+        syncContentStateStore("contentState.switchingVideos");
+    },
 
     get channelWhitelisted() { return channelWhitelisted; },
-    set channelWhitelisted(v: boolean) { channelWhitelisted = v; },
+    set channelWhitelisted(v: boolean) {
+        channelWhitelisted = v;
+        syncContentStateStore("contentState.channelWhitelisted");
+    },
 
     get sponsorTimesSubmitting() { return sponsorTimesSubmitting; },
-    set sponsorTimesSubmitting(v: SponsorTime[]) { sponsorTimesSubmitting = v; },
+    set sponsorTimesSubmitting(v: SponsorTime[]) {
+        sponsorTimesSubmitting = v;
+        syncContentStateStore("contentState.sponsorTimesSubmitting");
+    },
 
     get lastResponseStatus() { return lastResponseStatus; },
-    set lastResponseStatus(v: number) { lastResponseStatus = v; },
+    set lastResponseStatus(v: number) {
+        lastResponseStatus = v;
+        syncContentStateStore("contentState.lastResponseStatus");
+    },
 
     get pageLoaded() { return pageLoaded; },
-    set pageLoaded(v: boolean) { pageLoaded = v; },
+    set pageLoaded(v: boolean) {
+        pageLoaded = v;
+        syncContentStateStore("contentState.pageLoaded");
+    },
 };
 
 /**
@@ -106,6 +178,11 @@ export function setupPageLoadingListener(): void {
         const elapsed = Math.round(performance.now() - t0);
         console.debug(`${TAG} Page ready (${reason}) at +${elapsed}ms`);
         contentState.pageLoaded = true;
+        try {
+            getContentApp().bus.emit("app/pageReady", { pageLoaded: true }, { source: "content/state" });
+        } catch (error) {
+            // The app may not have finished bootstrapping yet.
+        }
     };
 
     window.addEventListener("message", (e: MessageEvent) => {

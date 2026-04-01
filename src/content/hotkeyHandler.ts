@@ -3,21 +3,13 @@ import { Keybind, keybindEquals } from "../config/config";
 import Utils from "../utils";
 import { addCleanupListener } from "../utils/cleanup";
 import { getFrameRate, getVideo } from "../utils/video";
-import { getSkipButtonControlBar } from "./segmentSubmission";
+import { getContentApp } from "./app";
 import { contentState } from "./state";
 
-export interface HotkeyHandlerDeps {
-    startOrEndTimingNewSegment: () => void;
-    submitSegments: () => void;
-    openSubmissionMenu: () => void;
-    previewRecentSegment: () => void;
-}
-
-let deps: HotkeyHandlerDeps;
 const utils = new Utils();
 
-export function initHotkeyHandler(d: HotkeyHandlerDeps): void {
-    deps = d;
+function getSkipButtonControlBar() {
+    return getContentApp().ui.getState().skipButtonControlBar;
 }
 
 export function addHotkeyListener(): void {
@@ -96,18 +88,18 @@ function hotkeyListener(e: KeyboardEvent): void {
 
         return;
     } else if (keybindEquals(key, startSponsorKey)) {
-        deps.startOrEndTimingNewSegment();
+        void getContentApp().commands.execute("segment/toggleCapture", undefined);
         return;
     } else if (keybindEquals(key, submitKey)) {
-        deps.submitSegments();
+        void getContentApp().commands.execute("segment/submit", undefined);
         return;
     } else if (keybindEquals(key, openSubmissionMenuKey)) {
         e.preventDefault();
 
-        deps.openSubmissionMenu();
+        void getContentApp().commands.execute("segment/openSubmissionMenu", undefined);
         return;
     } else if (keybindEquals(key, previewKey)) {
-        deps.previewRecentSegment();
+        void getContentApp().commands.execute("segment/previewRecent", undefined);
         return;
     }
 }

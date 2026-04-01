@@ -1,7 +1,6 @@
 import SkipNoticeComponent from "../components/SkipNoticeComponent";
 import Config from "../config";
 import { keybindToString } from "../config/config";
-import { ContentContainer } from "../ContentContainerTypes";
 import { SkipButtonControlBar } from "../js-components/skipButtonControlBar";
 import { VoteResponse } from "../messageTypes";
 import { CategoryPill } from "../render/CategoryPill";
@@ -21,7 +20,6 @@ import {
     NewVideoID,
     PortVideo,
     SegmentUUID,
-    SkipToTimeParams,
     SponsorHideType,
     SponsorSourceType,
     SponsorTime,
@@ -40,87 +38,152 @@ import { generateUserID } from "../utils/setup";
 import { getBvID, getCid, getVideo, getVideoID, waitForVideo } from "../utils/video";
 import { parseBvidAndCidFromVideoId } from "../utils/videoIdUtils";
 import { openWarningDialog } from "../utils/warnings";
-import { getLastPreviewBarUpdate } from "./previewBarManager";
-import { getSponsorSkipped } from "./skipScheduler";
-import { contentState } from "./state";
+import { getContentApp } from "./app";
+import { seekFrameByKeyPressListener } from "./hotkeyHandler";
+import { getSkipNoticeContentContainer } from "./skipNoticeContentContainer";
+import { contentState, syncContentStateStore } from "./state";
 
 const utils = new Utils();
 
-// --- Module-private state (formerly on contentState) ---
 let lookupWaiting = false;
 let loadedPreloadedSegment = false;
-let playerButtons: Record<string, { button: HTMLButtonElement; image: HTMLImageElement }> = {};
-let descriptionPill: DescriptionPortPill = null;
-let submissionNotice: SubmissionNotice = null;
-let popupInitialised = false;
-let skipButtonControlBar: SkipButtonControlBar = null;
-let categoryPill: CategoryPill = null;
+function getUIState() {
+    return getContentApp().ui.getState();
+}
 
-export function getSkipButtonControlBar() { return skipButtonControlBar; }
-export function getCategoryPill() { return categoryPill; }
-export function getPopupInitialised() { return popupInitialised; }
-export function setPopupInitialised(v: boolean) { popupInitialised = v; }
-export function getSubmissionNotice() { return submissionNotice; }
+function patchUIState(patch: Partial<ReturnType<typeof getUIState>>): void {
+    getContentApp().ui.patchState(patch);
+}
+
+function getPlayerButton(): PlayerButton {
+    const app = getContentApp();
+    const existingButton = app.ui.getState().playerButton;
+    if (existingButton) {
+        return existingButton;
+    }
+
+    const playerButton = new PlayerButton(
+        () => void app.commands.execute("segment/toggleCapture", undefined),
+        () => void app.commands.execute("segment/cancelCapture", undefined),
+        clearSponsorTimes,
+        () => void app.commands.execute("segment/openSubmissionMenu", undefined),
+        () => void app.commands.execute("popup/openInfoMenu", undefined)
+    );
+    app.ui.patchState({ playerButton });
+    return playerButton;
+}
+
+function emitSubmittingChanged(getFromConfig: boolean, source: string): void {
+    syncContentStateStore(source);
+    getContentApp().bus.emit(
+        "segments/submittingChanged",
+        {
+            sponsorTimesSubmitting: contentState.sponsorTimesSubmitting,
+            getFromConfig,
+        },
+        { source }
+    );
+}
+
+function emitSegmentsLoaded(source: string): void {
+    syncContentStateStore(source);
+    getContentApp().bus.emit(
+        "segments/loaded",
+        {
+            sponsorTimes: contentState.sponsorTimes,
+            status: contentState.lastResponseStatus,
+        },
+        { source }
+    );
+}
+
+export function getSkipButtonControlBar() { return getUIState().skipButtonControlBar; }
+export function getCategoryPill() { return getUIState().categoryPill; }
+export function getPopupInitialised() { return getUIState().popupInitialised; }
+export function setPopupInitialised(v: boolean) { patchUIState({ popupInitialised: v }); }
+export function getSubmissionNotice() { return getUIState().submissionNotice; }
 
 export function resetSubmissionState(): void {
     loadedPreloadedSegment = false;
     lookupWaiting = false;
-    popupInitialised = false;
+    const { submissionNotice } = getUIState();
     if (submissionNotice) {
         submissionNotice.close();
-        submissionNotice = null;
     }
-    playerButtons = {};
-    descriptionPill = null;
-    skipButtonControlBar = null;
-    categoryPill = null;
+    patchUIState({
+        playerButtons: {},
+        descriptionPill: null,
+        submissionNotice: null,
+        popupInitialised: false,
+        skipButtonControlBar: null,
+        categoryPill: null,
+    });
 }
 
-export interface SegmentSubmissionDeps {
-    skipToTime: (params: SkipToTimeParams) => void;
-    startSponsorSchedule: (seekTime?: boolean, seekToTime?: number) => void;
-    previewTime: (time: number, showNotice?: boolean) => void;
-    startSkipScheduleCheckingForStartSponsors: () => void;
-    updatePreviewBar: () => void;
-    selectSegment: (UUID: SegmentUUID) => void;
-    seekFrameByKeyPressListener: (event: KeyboardEvent) => void;
-    playerButton: PlayerButton;
-    skipNoticeContentContainer: ContentContainer;
-}
+export function registerSegmentSubmission(): void {
+    const app = getContentApp();
 
-let deps: SegmentSubmissionDeps;
-
-export function initSegmentSubmission(d: SegmentSubmissionDeps): void {
-    deps = d;
+    app.commands.register("segment/toggleCapture", () => startOrEndTimingNewSegment());
+    app.commands.register("segment/cancelCapture", () => cancelCreatingSegment());
+    app.commands.register("segment/submit", () => submitSegments());
+    app.commands.register("segment/openSubmissionMenu", () => openSubmissionMenu());
+    app.commands.register("segment/previewRecent", () => previewRecentSegment());
+    app.commands.register("segment/isCreationInProgress", () => isSegmentCreationInProgress());
+    app.commands.register("segment/getRealCurrentTime", () => getRealCurrentTime());
+    app.commands.register("segment/resetSubmissionNotice", ({ callRef }) => resetSponsorSubmissionNotice(callRef));
+    app.commands.register("skip/dontShowNoticeAgain", () => dontShowNoticeAgain());
+    app.commands.register("segment/vote", ({ type, UUID, category, skipNotice }) => vote(type, UUID, category, skipNotice));
+    app.commands.register("segment/voteAsync", ({ type, UUID, category }) => voteAsync(type, UUID, category));
+    app.commands.register("segments/lookup", ({ keepOldSubmissions, ignoreServerCache, forceUpdatePreviewBar }) =>
+        sponsorsLookup(keepOldSubmissions, ignoreServerCache, forceUpdatePreviewBar)
+    );
+    app.commands.register("segments/updateSubmitting", ({ getFromConfig }) =>
+        updateSponsorTimesSubmitting(getFromConfig)
+    );
+    app.commands.register("segments/import", ({ importedSegments }) => importSegments(importedSegments));
+    app.commands.register("ui/updatePlayerButtons", () => updateVisibilityOfPlayerControlsButton());
+    app.commands.register("ui/setupSkipButtonControlBar", () => setupSkipButtonControlBar());
+    app.commands.register("ui/setupCategoryPill", () => setupCategoryPill());
+    app.commands.register("ui/setupDescriptionPill", () => setupDescriptionPill());
+    app.commands.register("popup/openInfoMenu", () => openInfoMenu());
+    app.commands.register("popup/closeInfoMenu", () => closeInfoMenu());
+    app.commands.register("port/submitVideo", ({ ytbID }) => submitPortVideo(ytbID));
+    app.commands.register("port/voteVideo", ({ UUID, vote }) => portVideoVote(UUID, vote));
+    app.commands.register("port/updateSegments", ({ UUID }) => updateSegments(UUID));
 }
 
 export function setupSkipButtonControlBar(): void {
+    const { skipButtonControlBar } = getUIState();
     if (!skipButtonControlBar) {
-        skipButtonControlBar = new SkipButtonControlBar({
+        const nextSkipButtonControlBar = new SkipButtonControlBar({
             skip: (segment) =>
-                deps.skipToTime({
+                void getContentApp().commands.execute("skip/execute", {
                     v: getVideo(),
                     skipTime: segment.segment,
                     skippingSegments: [segment],
                     openNotice: true,
                     forceAutoSkip: true,
                 }),
-            selectSegment: deps.selectSegment,
+            selectSegment: (UUID) => void getContentApp().commands.execute("segments/select", { UUID }),
         });
+        patchUIState({ skipButtonControlBar: nextSkipButtonControlBar });
     }
 
-    skipButtonControlBar.attachToPage();
+    getSkipButtonControlBar()?.attachToPage();
 }
 
 export function setupCategoryPill(): void {
+    let { categoryPill } = getUIState();
     if (!categoryPill) {
         categoryPill = new CategoryPill();
+        patchUIState({ categoryPill });
     }
 
     categoryPill.attachToPage(voteAsync);
 }
 
 export function setupDescriptionPill(): void {
+    let { descriptionPill } = getUIState();
     if (!descriptionPill) {
         descriptionPill = new DescriptionPortPill(
             getPortVideo,
@@ -129,13 +192,15 @@ export function setupDescriptionPill(): void {
             updateSegments,
             sponsorsLookup
         );
+        patchUIState({ descriptionPill });
     }
     descriptionPill.setupDescription(getVideoID());
 }
 
 export async function updatePortVideoElements(newPortVideo: PortVideo): Promise<void> {
     contentState.portVideo = newPortVideo;
-    waitFor(() => descriptionPill).then(() => descriptionPill.setPortVideoData(newPortVideo));
+    waitFor(() => getUIState().descriptionPill).then(() => getUIState().descriptionPill.setPortVideoData(newPortVideo));
+    syncContentStateStore("segmentSubmission.updatePortVideoElements");
 
     chrome.runtime.sendMessage({
         message: "infoUpdated",
@@ -264,17 +329,19 @@ export async function sponsorsLookup(keepOldSubmissions = true, ignoreServerCach
                 }
             }
 
-            deps.startSkipScheduleCheckingForStartSponsors();
+            void getContentApp().commands.execute("skip/checkStartSponsors", undefined);
 
+            const { lastPreviewBarUpdate } = getUIState();
             if (
                 forceUpdatePreviewBar ||
-                getLastPreviewBarUpdate() == getVideoID() ||
-                (getLastPreviewBarUpdate() == null && !isNaN(getVideo().duration))
+                lastPreviewBarUpdate == getVideoID() ||
+                (lastPreviewBarUpdate == null && !isNaN(getVideo().duration))
             ) {
-                deps.updatePreviewBar();
+                void getContentApp().commands.execute("ui/updatePreviewBar", undefined);
             }
         }
     }
+    emitSegmentsLoaded("segmentSubmission.sponsorsLookup");
 
     chrome.runtime.sendMessage({
         message: "infoUpdated",
@@ -301,6 +368,7 @@ export async function lockedCategoriesLookup(): Promise<void> {
             )[0]?.categories;
             if (Array.isArray(categoriesResponse)) {
                 contentState.lockedCategories = categoriesResponse;
+                syncContentStateStore("segmentSubmission.lockedCategoriesLookup");
             }
         } catch (e) { } //eslint-disable-line no-empty
     }
@@ -310,7 +378,8 @@ export async function lockedCategoriesLookup(): Promise<void> {
 export async function updateVisibilityOfPlayerControlsButton(): Promise<void> {
     if (!getVideoID()) return;
 
-    playerButtons = await deps.playerButton.createButtons();
+    const playerButtons = await getPlayerButton().createButtons();
+    patchUIState({ playerButtons: playerButtons ?? {} });
 
     updateSegmentSubmitting();
 }
@@ -318,7 +387,7 @@ export async function updateVisibilityOfPlayerControlsButton(): Promise<void> {
 /** Updates the visibility of buttons on the player related to creating segments. */
 export function updateSegmentSubmitting(): void {
     if (!getVideoID()) return;
-    deps.playerButton.updateSegmentSubmitting(contentState.sponsorTimesSubmitting);
+    getPlayerButton().updateSegmentSubmitting(contentState.sponsorTimesSubmitting);
 }
 
 /**
@@ -362,6 +431,7 @@ export function startOrEndTimingNewSegment(): void {
 
     updateSegmentSubmitting();
     updateSponsorTimesSubmitting(false);
+    emitSubmittingChanged(false, "segmentSubmission.startOrEndTimingNewSegment");
 
     if (
         contentState.lastResponseStatus !== 200 &&
@@ -400,6 +470,7 @@ export function cancelCreatingSegment(): void {
 
     updateSegmentSubmitting();
     updateSponsorTimesSubmitting(false);
+    emitSubmittingChanged(false, "segmentSubmission.cancelCreatingSegment");
 }
 
 export function updateSponsorTimesSubmitting(getFromConfig = true): void {
@@ -424,15 +495,19 @@ export function updateSponsorTimesSubmitting(getFromConfig = true): void {
         }
     }
 
-    deps.updatePreviewBar();
+    void getContentApp().commands.execute("ui/updatePreviewBar", undefined);
 
-    if (getVideo() !== null) deps.startSponsorSchedule();
+    if (getVideo() !== null) {
+        void getContentApp().commands.execute("skip/startSchedule", {});
+    }
 
+    const { submissionNotice } = getUIState();
     if (submissionNotice !== null) {
         submissionNotice.update();
     }
 
     checkForPreloadedSegment();
+    emitSubmittingChanged(getFromConfig, "segmentSubmission.updateSponsorTimesSubmitting");
 }
 
 export function openInfoMenu(): void {
@@ -440,7 +515,7 @@ export function openInfoMenu(): void {
         return;
     }
 
-    popupInitialised = false;
+    patchUIState({ popupInitialised: false });
 
     const popup = document.createElement("div");
     popup.id = "sponsorBlockPopupContainer";
@@ -478,6 +553,7 @@ export function closeInfoMenu(): void {
     popup.remove();
 
     window.dispatchEvent(new Event("closePopupMenu"));
+    getContentApp().bus.emit("ui/popupClosed", {}, { source: "segmentSubmission.closeInfoMenu" });
 }
 
 export function clearSponsorTimes(): void {
@@ -493,9 +569,39 @@ export function clearSponsorTimes(): void {
 
         contentState.sponsorTimesSubmitting = [];
 
-        deps.updatePreviewBar();
+        void getContentApp().commands.execute("ui/updatePreviewBar", undefined);
         updateSegmentSubmitting();
+        emitSubmittingChanged(false, "segmentSubmission.clearSponsorTimes");
     }
+}
+
+export function importSegments(importedSegments: SponsorTime[]): void {
+    let addedSegments = false;
+
+    for (const segment of importedSegments) {
+        if (
+            !contentState.sponsorTimesSubmitting.some(
+                (s) =>
+                    Math.abs(s.segment[0] - segment.segment[0]) < 1 &&
+                    Math.abs(s.segment[1] - segment.segment[1]) < 1
+            )
+        ) {
+            contentState.sponsorTimesSubmitting.push(segment);
+            addedSegments = true;
+        }
+    }
+
+    if (!addedSegments) {
+        return;
+    }
+
+    Config.local.unsubmittedSegments[getVideoID()] = contentState.sponsorTimesSubmitting;
+    Config.forceLocalUpdate("unsubmittedSegments");
+
+    updateSegmentSubmitting();
+    updateSponsorTimesSubmitting(false);
+    openSubmissionMenu();
+    emitSubmittingChanged(false, "segmentSubmission.importSegments");
 }
 
 export async function vote(
@@ -510,21 +616,21 @@ export async function vote(
     }
 
     const response = await voteAsync(type, UUID, category);
-    if (response != undefined) {
-        if (skipNotice != null) {
-            if (response.successType == 1 || (response.successType == -1 && response.statusCode == 429)) {
-                skipNotice.afterVote.bind(skipNotice)(utils.getSponsorTimeFromUUID(contentState.sponsorTimes, UUID), type, category);
-            } else if (response.successType == -1) {
-                if (
-                    response.statusCode === 403 &&
-                    response.responseText.startsWith("Vote rejected due to a tip from a moderator.")
-                ) {
-                    openWarningDialog(deps.skipNoticeContentContainer);
-                } else {
-                    skipNotice.setNoticeInfoMessage.bind(skipNotice)(
-                        getErrorMessage(response.statusCode, response.responseText)
-                    );
-                }
+        if (response != undefined) {
+            if (skipNotice != null) {
+                if (response.successType == 1 || (response.successType == -1 && response.statusCode == 429)) {
+                    skipNotice.afterVote.bind(skipNotice)(utils.getSponsorTimeFromUUID(contentState.sponsorTimes, UUID), type, category);
+                } else if (response.successType == -1) {
+                    if (
+                        response.statusCode === 403 &&
+                        response.responseText.startsWith("Vote rejected due to a tip from a moderator.")
+                    ) {
+                        openWarningDialog(getSkipNoticeContentContainer);
+                    } else {
+                        skipNotice.setNoticeInfoMessage.bind(skipNotice)(
+                            getErrorMessage(response.statusCode, response.responseText)
+                        );
+                    }
 
                 skipNotice.resetVoteButtonInfo.bind(skipNotice)();
             }
@@ -540,12 +646,13 @@ export async function voteAsync(type: number, UUID: SegmentUUID, category?: Cate
     if (sponsorIndex == -1 || contentState.sponsorTimes[sponsorIndex].source !== SponsorSourceType.Server)
         return Promise.resolve(undefined);
 
-    if ((type === 0 && getSponsorSkipped()[sponsorIndex]) || (type === 1 && !getSponsorSkipped()[sponsorIndex])) {
+    const sponsorSkipped = getContentApp().commands.execute("skip/getSponsorSkipped", undefined) as boolean[];
+    if ((type === 0 && sponsorSkipped[sponsorIndex]) || (type === 1 && !sponsorSkipped[sponsorIndex])) {
         let factor = 1;
         if (type == 0) {
             factor = -1;
 
-            getSponsorSkipped()[sponsorIndex] = false;
+            sponsorSkipped[sponsorIndex] = false;
         }
 
         Config.config.minutesSaved =
@@ -579,7 +686,7 @@ export async function voteAsync(type: number, UUID: SegmentUUID, category?: Cate
                             utils.addHiddenSegment(getVideoID(), segment.UUID, segment.hidden);
                         }
 
-                        deps.updatePreviewBar();
+                        void getContentApp().commands.execute("ui/updatePreviewBar", undefined);
                     }
                 }
 
@@ -605,31 +712,40 @@ export function dontShowNoticeAgain(): void {
  * Helper method for the submission notice to clear itself when it closes
  */
 export function resetSponsorSubmissionNotice(callRef = true): void {
+    const { submissionNotice } = getUIState();
     submissionNotice?.close(callRef);
-    submissionNotice = null;
+    patchUIState({ submissionNotice: null });
 }
 
 export function closeSubmissionMenu(): void {
+    const { submissionNotice } = getUIState();
     submissionNotice?.close();
-    submissionNotice = null;
+    patchUIState({ submissionNotice: null });
 }
 
 export function openSubmissionMenu(): void {
+    const { submissionNotice } = getUIState();
     if (submissionNotice !== null) {
         closeSubmissionMenu();
         return;
     }
 
     if (contentState.sponsorTimesSubmitting !== undefined && contentState.sponsorTimesSubmitting.length > 0) {
-        submissionNotice = new SubmissionNotice(deps.skipNoticeContentContainer, sendSubmitMessage);
-        document.addEventListener("keydown", deps.seekFrameByKeyPressListener);
+        patchUIState({
+            submissionNotice: new SubmissionNotice(getSkipNoticeContentContainer, sendSubmitMessage),
+        });
+        document.addEventListener("keydown", seekFrameByKeyPressListener);
     }
 }
 
 export function previewRecentSegment(): void {
     if (contentState.sponsorTimesSubmitting !== undefined && contentState.sponsorTimesSubmitting.length > 0) {
-        deps.previewTime(contentState.sponsorTimesSubmitting[contentState.sponsorTimesSubmitting.length - 1].segment[0] - defaultPreviewTime);
+        void getContentApp().commands.execute("skip/previewTime", {
+            time: contentState.sponsorTimesSubmitting[contentState.sponsorTimesSubmitting.length - 1].segment[0] - defaultPreviewTime,
+            unpause: true,
+        });
 
+        const { submissionNotice } = getUIState();
         if (submissionNotice) {
             submissionNotice.scrollToBottom();
         }
@@ -637,6 +753,7 @@ export function previewRecentSegment(): void {
 }
 
 export function submitSegments(): void {
+    const { submissionNotice } = getUIState();
     if (contentState.sponsorTimesSubmitting !== undefined && contentState.sponsorTimesSubmitting.length > 0 && submissionNotice !== null) {
         submissionNotice.submit();
     }
@@ -659,8 +776,13 @@ export async function sendSubmitMessage(): Promise<boolean> {
         return false;
     }
 
-    playerButtons.submit.image.src = chrome.runtime.getURL("icons/PlayerUploadIconSponsorBlocker.svg");
-    const stopAnimation = AnimationUtils.applyLoadingAnimation(playerButtons.submit.button, 1, () =>
+    if (!getUIState().playerButtons.submit) {
+        await updateVisibilityOfPlayerControlsButton();
+    }
+
+    const submitButtons = getUIState().playerButtons;
+    submitButtons.submit.image.src = chrome.runtime.getURL("icons/PlayerUploadIconSponsorBlocker.svg");
+    const stopAnimation = AnimationUtils.applyLoadingAnimation(submitButtons.submit.button, 1, () =>
         updateSegmentSubmitting()
     );
 
@@ -719,26 +841,29 @@ export async function sendSubmitMessage(): Promise<boolean> {
 
         contentState.sponsorTimesSubmitting = [];
 
-        deps.updatePreviewBar();
+        syncContentStateStore("segmentSubmission.sendSubmitMessage.success");
+        emitSegmentsLoaded("segmentSubmission.sendSubmitMessage.success");
+        emitSubmittingChanged(false, "segmentSubmission.sendSubmitMessage.success");
+        void getContentApp().commands.execute("ui/updatePreviewBar", undefined);
 
         const fullVideoSegment = contentState.sponsorTimes.filter((time) => time.actionType === ActionType.Full)[0];
         if (fullVideoSegment) {
-            waitFor(() => categoryPill).then(() => {
-                categoryPill?.setSegment(fullVideoSegment);
+            waitFor(() => getUIState().categoryPill).then(() => {
+                getUIState().categoryPill?.setSegment(fullVideoSegment);
             });
             getVideoLabel(getVideoID(), true);
         }
 
         return true;
     } else {
-        playerButtons.submit.button.style.animation = "unset";
-        playerButtons.submit.image.src = chrome.runtime.getURL("icons/PlayerUploadFailedIconSponsorBlocker.svg");
+        submitButtons.submit.button.style.animation = "unset";
+        submitButtons.submit.image.src = chrome.runtime.getURL("icons/PlayerUploadFailedIconSponsorBlocker.svg");
 
         if (
             response.status === 403 &&
             response.responseText.startsWith("Submission rejected due to a tip from a moderator.")
         ) {
-            openWarningDialog(deps.skipNoticeContentContainer);
+            openWarningDialog(getSkipNoticeContentContainer);
         } else {
             showMessage(getErrorMessage(response.status, response.responseText), "warning");
         }
