@@ -75,8 +75,12 @@ export interface ContentEventMap {
     [CONTENT_EVENTS.VIDEO_ELEMENT_CHANGED]: { newVideo: boolean; video: HTMLVideoElement | null };
     [CONTENT_EVENTS.VIDEO_CHANNEL_RESOLVED]: { channelIDInfo: ChannelIDInfo };
     [CONTENT_EVENTS.CONFIG_CHANGED]: { changes: StorageChangesObject };
-    [CONTENT_EVENTS.SEGMENTS_LOADED]: { sponsorTimes: SponsorTime[]; status: number };
-    [CONTENT_EVENTS.SEGMENTS_SUBMITTING_CHANGED]: { sponsorTimesSubmitting: SponsorTime[]; getFromConfig: boolean };
+    [CONTENT_EVENTS.SEGMENTS_LOADED]: { sponsorTimes: SponsorTime[]; status: number; videoID: NewVideoID | null };
+    [CONTENT_EVENTS.SEGMENTS_SUBMITTING_CHANGED]: {
+        sponsorTimesSubmitting: SponsorTime[];
+        getFromConfig: boolean;
+        videoID: NewVideoID | null;
+    };
     [CONTENT_EVENTS.SKIP_EXECUTED]: {
         skipTime: [number, number];
         skippingSegments: SponsorTime[];
@@ -85,6 +89,7 @@ export interface ContentEventMap {
         unskipTime?: number | null;
     };
     [CONTENT_EVENTS.SKIP_NOTICE_REQUESTED]: {
+        noticeKind: "skip" | "advance";
         skippingSegments: SponsorTime[];
         autoSkip: boolean;
         unskipTime?: number | null;

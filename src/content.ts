@@ -12,6 +12,7 @@ import {
     getCategoryPill,
     getSkipButtonControlBar,
 } from "./content/segmentSubmission";
+import { registerSkipUIManager } from "./content/skipUIManager";
 import {
     contentState,
     getPageLoaded,
@@ -81,6 +82,7 @@ function init(): void {
 
     registerPreviewBarManager();
     registerSegmentSubmission();
+    registerSkipUIManager();
     registerSkipScheduler();
     app.commands.register("config/applyCategoryColors", () => setCategoryColorCSSVariables());
 
@@ -165,6 +167,8 @@ function resetValues() {
         contentState.advanceSkipNotices.close();
         contentState.advanceSkipNotices = null;
     }
+
+    contentState.activeSkipKeybindElement = null;
 
     syncContentStateStore("content.resetValues");
 }

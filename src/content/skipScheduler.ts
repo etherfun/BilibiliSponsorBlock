@@ -1,6 +1,4 @@
 import Config from "../config";
-import advanceSkipNotice from "../render/advanceSkipNotice";
-import SkipNotice from "../render/SkipNotice";
 import { asyncRequestToServer } from "../requests/requests";
 import {
     ActionType,
@@ -27,7 +25,7 @@ import {
     getVideoID,
 } from "../utils/video";
 import { getContentApp } from "./app";
-import { getSkipNoticeContentContainer } from "./skipNoticeContentContainer";
+import { CONTENT_EVENTS } from "./app/events";
 import {
     contentState,
     endTimeSkipBuffer,
@@ -86,8 +84,58 @@ function getCategoryPill() {
     return getContentApp().ui.getState().categoryPill;
 }
 
-function getSkipButtonControlBar() {
-    return getContentApp().ui.getState().skipButtonControlBar;
+function emitSkipNoticeRequested(
+    noticeKind: "skip" | "advance",
+    skippingSegments: SponsorTime[],
+    autoSkip: boolean,
+    unskipTime: number | null | undefined,
+    startReskip: boolean,
+    source: string
+): void {
+    getContentApp().bus.emit(
+        CONTENT_EVENTS.SKIP_NOTICE_REQUESTED,
+        {
+            noticeKind,
+            skippingSegments,
+            autoSkip,
+            unskipTime,
+            startReskip,
+        },
+        { source }
+    );
+}
+
+function emitSkipButtonStateChanged(enabled: boolean, segment: SponsorTime | null, duration: number | undefined, source: string): void {
+    getContentApp().bus.emit(
+        CONTENT_EVENTS.SKIP_BUTTON_STATE_CHANGED,
+        {
+            enabled,
+            segment,
+            duration,
+        },
+        { source }
+    );
+}
+
+function emitSkipExecuted(
+    skipTime: [number, number],
+    skippingSegments: SponsorTime[],
+    autoSkip: boolean,
+    openNotice: boolean,
+    unskipTime: number | null | undefined,
+    source: string
+): void {
+    getContentApp().bus.emit(
+        CONTENT_EVENTS.SKIP_EXECUTED,
+        {
+            skipTime,
+            skippingSegments,
+            autoSkip,
+            openNotice,
+            unskipTime,
+        },
+        { source }
+    );
 }
 
 export function registerSkipScheduler(): void {
@@ -111,6 +159,21 @@ export function registerSkipScheduler(): void {
     app.commands.register("skip/isSegmentMarkedNearCurrentTime", ({ currentTime, range }) =>
         isSegmentMarkedNearCurrentTime(currentTime, range)
     );
+
+    app.bus.on(CONTENT_EVENTS.SEGMENTS_LOADED, ({ sponsorTimes, videoID }) => {
+        if (videoID !== getVideoID() || sponsorTimes.length === 0) {
+            return;
+        }
+
+        startSkipScheduleCheckingForStartSponsors();
+    });
+    app.bus.on(CONTENT_EVENTS.SEGMENTS_SUBMITTING_CHANGED, ({ videoID }) => {
+        if (videoID !== getVideoID() || getVideo() === null) {
+            return;
+        }
+
+        void startSponsorSchedule();
+    });
 }
 
 export function cancelSponsorSchedule(): void {
@@ -344,7 +407,14 @@ export async function startSponsorSchedule(
 
                 if (currentAdvanceSkipSchedule) clearTimeout(currentAdvanceSkipSchedule);
                 currentAdvanceSkipSchedule = setTimeout(() => {
-                    createAdvanceSkipNotice([skippingSegments[0]], skipTime[0], autoSkip, false);
+                    emitSkipNoticeRequested(
+                        "advance",
+                        [skippingSegments[0]],
+                        autoSkip,
+                        skipTime[0],
+                        false,
+                        "skipScheduler.startSponsorSchedule.advanceNotice"
+                    );
                     sessionStorage.setItem("SKIPPING", "true");
                 }, timeUntilPopup);
             }
@@ -896,23 +966,31 @@ export function skipToTime({ v, skipTime, skippingSegments, openNotice, forceAut
     }
 
     if (!autoSkip && skippingSegments.length === 1 && skippingSegments[0].actionType === ActionType.Poi) {
-        waitFor(() => getSkipButtonControlBar()).then(() => {
-            getSkipButtonControlBar().enable(skippingSegments[0]);
-            if (Config.config.skipKeybind == null) getSkipButtonControlBar().setShowKeybindHint(false);
-
-            contentState.activeSkipKeybindElement?.setShowKeybindHint(false);
-            contentState.activeSkipKeybindElement = getSkipButtonControlBar();
-        });
+        emitSkipButtonStateChanged(true, skippingSegments[0], undefined, "skipScheduler.skipToTime.poi");
     } else {
         if (openNotice) {
             if (!Config.config.dontShowNotice || !autoSkip) {
-                createSkipNotice(skippingSegments, autoSkip, unskipTime, false);
+                emitSkipNoticeRequested(
+                    "skip",
+                    skippingSegments,
+                    autoSkip,
+                    unskipTime,
+                    false,
+                    "skipScheduler.skipToTime.notice"
+                );
             } else if (autoSkip) {
                 contentState.activeSkipKeybindElement?.setShowKeybindHint(false);
                 contentState.activeSkipKeybindElement = {
                     setShowKeybindHint: () => { },
                     toggleSkip: () => {
-                        createSkipNotice(skippingSegments, autoSkip, unskipTime, true);
+                        emitSkipNoticeRequested(
+                            "skip",
+                            skippingSegments,
+                            autoSkip,
+                            unskipTime,
+                            true,
+                            "skipScheduler.skipToTime.noticeToggle"
+                        );
 
                         unskipSponsorTime(skippingSegments[0], unskipTime);
                     },
@@ -921,66 +999,9 @@ export function skipToTime({ v, skipTime, skippingSegments, openNotice, forceAut
         }
     }
 
+    emitSkipExecuted(skipTime as [number, number], skippingSegments, autoSkip, openNotice, unskipTime, "skipScheduler.skipToTime");
+
     if (autoSkip || isSubmittingSegment) sendTelemetryAndCount(skippingSegments, skipTime[1] - skipTime[0], true);
-}
-
-export function createSkipNotice(
-    skippingSegments: SponsorTime[],
-    autoSkip: boolean,
-    unskipTime: number,
-    startReskip: boolean
-): void {
-    for (const skipNotice of contentState.skipNotices) {
-        if (
-            skippingSegments.length === skipNotice.segments.length &&
-            skippingSegments.every((segment) => skipNotice.segments.some((s) => s.UUID === segment.UUID))
-        ) {
-            return;
-        }
-    }
-
-    const advanceSkipNoticeShow = !!contentState.advanceSkipNotices;
-    const newSkipNotice = new SkipNotice(
-        skippingSegments,
-        autoSkip,
-        getSkipNoticeContentContainer,
-        () => {
-            contentState.advanceSkipNotices?.close();
-            contentState.advanceSkipNotices = null;
-        },
-        unskipTime,
-        startReskip,
-        advanceSkipNoticeShow
-    );
-    if (Config.config.skipKeybind == null) newSkipNotice.setShowKeybindHint(false);
-    contentState.skipNotices.push(newSkipNotice);
-
-    contentState.activeSkipKeybindElement?.setShowKeybindHint(false);
-    contentState.activeSkipKeybindElement = newSkipNotice;
-}
-
-export function createAdvanceSkipNotice(
-    skippingSegments: SponsorTime[],
-    unskipTime: number,
-    autoSkip: boolean,
-    startReskip: boolean
-): void {
-    if (contentState.advanceSkipNotices && !contentState.advanceSkipNotices.closed && contentState.advanceSkipNotices.sameNotice(skippingSegments)) {
-        return;
-    }
-
-    contentState.advanceSkipNotices?.close();
-    contentState.advanceSkipNotices = new advanceSkipNotice(
-        skippingSegments,
-        getSkipNoticeContentContainer,
-        unskipTime,
-        autoSkip,
-        startReskip
-    );
-    if (Config.config.skipKeybind == null) contentState.advanceSkipNotices.setShowKeybindHint(false);
-
-    contentState.activeSkipKeybindElement?.setShowKeybindHint(false);
-    contentState.activeSkipKeybindElement = contentState.advanceSkipNotices;
 }
 
 export function unskipSponsorTime(segment: SponsorTime, unskipTime: number = null, forceSeek = false): void {

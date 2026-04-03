@@ -57,6 +57,20 @@ export function registerPreviewBarManager(): void {
     app.bus.on(CONTENT_EVENTS.PLAYER_DURATION_CHANGED, () => {
         updatePreviewBar();
     });
+    app.bus.on(CONTENT_EVENTS.SEGMENTS_LOADED, ({ videoID }) => {
+        if (videoID !== getVideoID()) {
+            return;
+        }
+
+        updatePreviewBar();
+    });
+    app.bus.on(CONTENT_EVENTS.SEGMENTS_SUBMITTING_CHANGED, ({ videoID }) => {
+        if (videoID !== getVideoID()) {
+            return;
+        }
+
+        updatePreviewBar();
+    });
 }
 
 export function createPreviewBar(): void {

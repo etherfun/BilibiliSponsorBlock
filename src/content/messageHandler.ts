@@ -158,7 +158,14 @@ export function handleContentMessage(
                     (s) => s.hidden !== SponsorHideType.Visible || s.actionType !== ActionType.Poi
                 )
             ) {
-                uiState.skipButtonControlBar.disable();
+                app.bus.emit(
+                    CONTENT_EVENTS.SKIP_BUTTON_STATE_CHANGED,
+                    {
+                        enabled: false,
+                        segment: null,
+                    },
+                    { source: "messageHandler.hideSegment" }
+                );
             }
             break;
         case "closePopup":
