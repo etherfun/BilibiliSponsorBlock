@@ -11,15 +11,27 @@ import { CalculateAvidToBvid } from "./bvidAvidUtils";
 export async function getBilibiliVideoID(url?: string): Promise<NewVideoID | null> {
     url ||= document?.URL;
 
-    if ((url.includes("www.bilibili.com/video/") ||
-        url.includes("www.bilibili.com/list/")) ||
+    if (
+        url.includes("www.bilibili.com/video/") ||
+        url.includes("www.bilibili.com/list/") ||
         url.includes("www.bilibili.com/festival/") ||
         url.includes("www.bilibili.com/bangumi/") ||
         //漏网之鱼
-        /www\.bilibili\.com.*((BV1[a-zA-Z0-9]{9})|(av\d+)|((ss\d+)|(ep\d+)))/.test(url)) {
-        const id = (await getVideoIDFromWindow()) || (await getVideoIDFromPlayerManifest()) || (await getVideoIDFromURL(url));
-        return id;
+        /www\.bilibili\.com.*((BV1[a-zA-Z0-9]{9})|(av\d+)|((ss\d+)|(ep\d+)))/.test(url)
+    ) {
+        const windowID = await getVideoIDFromWindow();
+        if (windowID) {
+            return windowID;
+        }
+
+        const videoInfoID = await getVideoIDFromPlayerManifest();
+        if (videoInfoID) {
+            return videoInfoID;
+        }
+
+        return await getVideoIDFromURL(url);
     }
+
     return null;
 }
 
@@ -33,12 +45,13 @@ export function getVideoIDFromWindow(timeout = 200): Promise<NewVideoID | null> 
             sendType: "getBvID",
             responseType: "returnBvID",
         },
-        timeout
+        timeout,
     );
 }
 
 const BILIBILI_VIDEO_URL_REGEX = /^\/video\/((BV1[a-zA-Z0-9]{9})|(av\d+)|((ss\d+)|(ep\d+)))\/?/;
 const BVID_REGEX = /^(BV1[a-zA-Z0-9]{9})$/;
+
 /**
  * Parse without side effects
  */
@@ -78,13 +91,16 @@ export async function getBvIDFromURL(url: string): Promise<BVID | null> {
         return null;
     } else {
         const id = urlObject.searchParams.get("bvid");
-        return id as BVID ?? null;
+        return (id as BVID) ?? null;
     }
 }
 
 export async function getVideoIDFromPlayerManifest(): Promise<NewVideoID | null> {
     let bvid: BVID | null = null;
     const videoInfo = await getVideoInfoFromWindowOnplayerManifest();
+    if (!videoInfo) {
+        return null;
+    }
 
     if (!videoInfo.bvid) {
         bvid = videoInfo.aid ? CalculateAvidToBvid(videoInfo.aid) : null;
@@ -93,7 +109,7 @@ export async function getVideoIDFromPlayerManifest(): Promise<NewVideoID | null>
     }
     if (!bvid) return null;
 
-    const cid = videoInfo?.cid ?? "";
+    const cid = videoInfo.cid ?? "";
     return (bvid + "+" + cid) as NewVideoID;
 }
 
@@ -134,9 +150,8 @@ export async function getVideoIDFromURL(url: string): Promise<NewVideoID | null>
                     return null;
                 }
             }
-        }
-        // List video page
-        else {
+        } else {
+            // List video page
             bvid = urlObject.searchParams.get("bvid") as BVID;
         }
 
@@ -173,10 +188,10 @@ export function parseYoutubeID(rawId: string): YTID | null {
     const regexMatch = strictMatch
         ? (strictMatch as YTID)
         : negativeRegex.test(rawId)
-        ? null
-        : urlMatch
-        ? (urlMatch as YTID)
-        : null;
+          ? null
+          : urlMatch
+            ? (urlMatch as YTID)
+            : null;
 
     return regexMatch ? regexMatch : parseYouTubeVideoIDFromURL(rawId);
 }

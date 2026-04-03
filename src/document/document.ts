@@ -1,9 +1,11 @@
-import { BVID } from "../types";
+import { AID, BVID, CID } from "../types";
 import { waitFor } from "../utils/";
 import { InjectedScriptMessageSend, sourceId } from "../utils/injectedScriptMessageUtils";
 import { getBvid } from "./aidMap";
 import { getCidFromBvIdPage, getCidMap } from "./cidListMap";
 import { getFrameRate } from "./frameRateUtils";
+
+type PlayerManifest = { aid: AID | null; cid: CID | null; bvid: BVID | null; p: number };
 
 const sendMessageToContent = (messageData: InjectedScriptMessageSend, payload): void => {
     window.postMessage(
@@ -16,6 +18,46 @@ const sendMessageToContent = (messageData: InjectedScriptMessageSend, payload): 
         "/"
     );
 };
+
+function readPlayerManifest(): PlayerManifest | null {
+    try {
+        return window?.player?.getManifest?.() ?? null;
+    } catch (error) {
+        return null;
+    }
+}
+
+function readInitialStateVideoInfo(): PlayerManifest | null {
+    const initialState = window?.__INITIAL_STATE__;
+    if (!initialState?.cid || (!initialState.bvid && !initialState.aid)) {
+        return null;
+    }
+
+    const page = Number(new URL(window.location.href).searchParams.get("p") ?? 1);
+    return {
+        aid: initialState.aid ?? null,
+        cid: initialState.cid ?? null,
+        bvid: initialState.bvid ?? null,
+        p: Number.isFinite(page) && page > 0 ? page : 1,
+    };
+}
+
+async function getPlayerManifest(timeout = 2500): Promise<PlayerManifest | null> {
+    const existingManifest = readPlayerManifest();
+    if (existingManifest) {
+        return existingManifest;
+    }
+
+    try {
+        return await waitFor(() => readPlayerManifest(), timeout, 50);
+    } catch (error) {
+        const initialStateVideoInfo = readInitialStateVideoInfo();
+        if (initialStateVideoInfo) {
+            return initialStateVideoInfo;
+        }
+        return null;
+    }
+}
 
 async function windowMessageListener(message: MessageEvent) {
     const data: InjectedScriptMessageSend = message.data;
@@ -43,7 +85,7 @@ async function windowMessageListener(message: MessageEvent) {
         } else if (data.type === "getCidMap") {
             sendMessageToContent(data, await getCidMap(data.payload as BVID));
         } else if (data.type === "getVideoInfoOnplayer") {
-            sendMessageToContent(data, window.player.getManifest());
+            sendMessageToContent(data, await getPlayerManifest());
         }
     }
 }

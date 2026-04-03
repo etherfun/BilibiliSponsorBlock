@@ -97,11 +97,13 @@ export async function getCidMapFromWindow(bvid: BVID): Promise<Map<number, CID> 
     );
 }
 
-export async function getVideoInfoFromWindowOnplayerManifest(): Promise<{ aid: AID | null; cid: CID | null; bvid: BVID | null; p: number }> {
+export async function getVideoInfoFromWindowOnplayerManifest(): Promise<{ aid: AID | null; cid: CID | null; bvid: BVID | null; p: number } | null> {
     return getPropertyFromWindow<{ aid: AID | null; cid: CID | null; bvid: BVID | null; p: number }>(
         {
             sendType: "getVideoInfoOnplayer",
             responseType: "returnVideoInfo",
-        }
+        },
+        undefined,
+        3200
     );
 }
