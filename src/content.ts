@@ -75,6 +75,20 @@ function init(): void {
         app.bus.on(CONTENT_EVENTS.VIDEO_CHANNEL_RESOLVED, ({ channelIDInfo }) => {
             void channelIDChange(channelIDInfo);
         });
+        app.bus.on(CONTENT_EVENTS.CHANNEL_WHITELIST_CHANGED, ({ videoID, whitelisted, reason }) => {
+            if (videoID !== getVideoID()) {
+                return;
+            }
+
+            if (reason === "popupToggle") {
+                void app.commands.execute("segments/lookup", {});
+                return;
+            }
+
+            if (reason === "channelResolved" && whitelisted && Config.config.forceChannelCheck && contentState.sponsorTimes?.length > 0) {
+                void app.commands.execute("skip/checkStartSponsors", undefined);
+            }
+        });
         app.bus.on(CONTENT_EVENTS.VIDEO_ELEMENT_CHANGED, ({ newVideo, video }) => {
             videoElementChange(newVideo, video);
         });
@@ -216,10 +230,16 @@ async function channelIDChange(channelIDInfo: ChannelIDInfo) {
         whitelistedChannels.some((ch) => ch.id === channelIDInfo.id)
     ) {
         contentState.channelWhitelisted = true;
-    }
-
-    if (Config.config.forceChannelCheck && contentState.sponsorTimes?.length > 0) {
-        void app.commands.execute("skip/checkStartSponsors", undefined);
+        syncContentStateStore("content.channelIDChange");
+        app.bus.emit(
+            CONTENT_EVENTS.CHANNEL_WHITELIST_CHANGED,
+            {
+                videoID: getVideoID(),
+                whitelisted: true,
+                reason: "channelResolved",
+            },
+            { source: "content.channelIDChange" }
+        );
     }
 }
 

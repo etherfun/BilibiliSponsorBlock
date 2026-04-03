@@ -100,6 +100,42 @@ function emitSegmentsLoaded(source: string): void {
     );
 }
 
+function emitSegmentUpdated(
+    segment: SponsorTime,
+    reason: "popupHide" | "voteDown" | "voteUp" | "categoryVote",
+    source: string
+): void {
+    syncContentStateStore(source);
+    getContentApp().bus.emit(
+        CONTENT_EVENTS.SEGMENT_UPDATED,
+        {
+            videoID: getVideoID(),
+            UUID: segment.UUID,
+            segment,
+            reason,
+        },
+        { source }
+    );
+}
+
+function disableSkipButtonIfNoVisiblePoi(source: string): void {
+    if (
+        getUIState().skipButtonControlBar?.isEnabled() &&
+        contentState.sponsorTimesSubmitting.every(
+            (s) => s.hidden !== SponsorHideType.Visible || s.actionType !== ActionType.Poi
+        )
+    ) {
+        getContentApp().bus.emit(
+            CONTENT_EVENTS.SKIP_BUTTON_STATE_CHANGED,
+            {
+                enabled: false,
+                segment: null,
+            },
+            { source }
+        );
+    }
+}
+
 function sendInfoUpdatedMessage(portVideo = contentState.portVideo): void {
     chrome.runtime.sendMessage({
         message: "infoUpdated",
@@ -183,6 +219,13 @@ export function registerSegmentSubmission(): void {
 
         void updateVisibilityOfPlayerControlsButton();
         getUIState().submissionNotice?.update();
+    });
+    app.bus.on(CONTENT_EVENTS.SEGMENT_UPDATED, ({ videoID }) => {
+        if (videoID !== getVideoID()) {
+            return;
+        }
+
+        disableSkipButtonIfNoVisiblePoi("segmentSubmission.segmentUpdated");
     });
 }
 
@@ -659,19 +702,25 @@ export async function voteAsync(type: number, UUID: SegmentUUID, category?: Cate
                 if (response.successType === 1) {
                     const segment = utils.getSponsorTimeFromUUID(contentState.sponsorTimes, UUID);
                     if (segment) {
+                        let reason: "voteDown" | "voteUp" | "categoryVote" | null = null;
                         if (type === 0) {
                             segment.hidden = SponsorHideType.Downvoted;
+                            reason = "voteDown";
                         } else if (category) {
                             segment.category = category;
+                            reason = "categoryVote";
                         } else if (type === 1) {
                             segment.hidden = SponsorHideType.Visible;
+                            reason = "voteUp";
                         }
 
                         if (!category && !Config.config.isVip) {
                             utils.addHiddenSegment(getVideoID(), segment.UUID, segment.hidden);
                         }
 
-                        void getContentApp().commands.execute("ui/updatePreviewBar", undefined);
+                        if (reason) {
+                            emitSegmentUpdated(segment, reason, "segmentSubmission.voteAsync");
+                        }
                     }
                 }
 

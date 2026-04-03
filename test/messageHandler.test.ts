@@ -1,5 +1,7 @@
 /** @jest-environment jsdom */
 
+import type { SegmentUUID, SponsorTime } from "../src/types";
+
 describe("content message handler", () => {
     function installModuleMocks(): void {
         jest.doMock("../src/config", () => ({
@@ -19,6 +21,13 @@ describe("content message handler", () => {
         }));
         jest.doMock("../src/thumbnail-utils/thumbnailManagement", () => ({
             checkPageForNewThumbnails: jest.fn(),
+        }));
+        jest.doMock("../src/utils", () => ({
+            __esModule: true,
+            default: jest.fn().mockImplementation(() => ({
+                getSponsorTimeFromUUID: jest.fn((segments, uuid) => segments.find((segment) => segment.UUID === uuid)),
+                addHiddenSegment: jest.fn(),
+            })),
         }));
     }
 
@@ -68,10 +77,10 @@ describe("content message handler", () => {
         document.body.innerHTML = "<div></div>";
     });
 
-    test("sponsorStart dispatches commands and returns current creation state", () => {
+    test("sponsorStart dispatches commands and returns current creation state", async () => {
         try {
-            const { createContentApp } = require("../src/content/app");
-            const { handleContentMessage } = require("../src/content/messageHandler");
+            const { createContentApp } = await import("../src/content/app");
+            const { handleContentMessage } = await import("../src/content/messageHandler");
             const app = createContentApp();
 
             let toggled = false;
@@ -91,10 +100,10 @@ describe("content message handler", () => {
         }
     });
 
-    test("submitTimes maps to the open submission command", () => {
+    test("submitTimes maps to the open submission command", async () => {
         try {
-            const { createContentApp } = require("../src/content/app");
-            const { handleContentMessage } = require("../src/content/messageHandler");
+            const { createContentApp } = await import("../src/content/app");
+            const { handleContentMessage } = await import("../src/content/messageHandler");
             const app = createContentApp();
 
             let opened = false;
@@ -107,6 +116,90 @@ describe("content message handler", () => {
             handleContentMessage({ message: "submitTimes" }, null, sendResponse);
 
             expect(opened).toBe(true);
+            expect(sendResponse).toHaveBeenCalledWith({});
+        } catch (error) {
+            throw new Error(error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+        }
+    });
+
+    test("whitelistChange emits a business event and lets subscribers trigger segment lookup", async () => {
+        try {
+            const { createContentApp } = await import("../src/content/app");
+            const { CONTENT_EVENTS } = await import("../src/content/app/events");
+            const { handleContentMessage } = await import("../src/content/messageHandler");
+            const { contentState } = await import("../src/content/state");
+            const app = createContentApp();
+
+            const whitelistEvents = [];
+            let lookupCalls = 0;
+
+            app.commands.register("segments/lookup", () => {
+                lookupCalls += 1;
+            });
+            app.bus.on(CONTENT_EVENTS.CHANNEL_WHITELIST_CHANGED, (payload) => {
+                whitelistEvents.push(payload);
+                void app.commands.execute("segments/lookup", {});
+            });
+
+            const sendResponse = jest.fn();
+
+            handleContentMessage({ message: "whitelistChange", value: true }, null, sendResponse);
+
+            expect(contentState.channelWhitelisted).toBe(true);
+            expect(whitelistEvents).toEqual([
+                {
+                    videoID: "BV1test",
+                    whitelisted: true,
+                    reason: "popupToggle",
+                },
+            ]);
+            expect(lookupCalls).toBe(1);
+            expect(sendResponse).toHaveBeenCalledWith({});
+        } catch (error) {
+            throw new Error(error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+        }
+    });
+
+    test("hideSegment emits segment/updated without directly calling preview bar commands", async () => {
+        try {
+            const { createContentApp } = await import("../src/content/app");
+            const { CONTENT_EVENTS } = await import("../src/content/app/events");
+            const { handleContentMessage } = await import("../src/content/messageHandler");
+            const { contentState } = await import("../src/content/state");
+            const app = createContentApp();
+
+            const segment = {
+                UUID: "test-segment" as SegmentUUID,
+                cid: 1,
+                segment: [0, 10] as [number, number],
+                category: "sponsor",
+                actionType: 0,
+                source: 1,
+                hidden: 0,
+            } as unknown as SponsorTime;
+            contentState.sponsorTimes = [segment];
+
+            const updatedEvents = [];
+            app.bus.on(CONTENT_EVENTS.SEGMENT_UPDATED, (payload) => {
+                updatedEvents.push(payload);
+            });
+
+            const sendResponse = jest.fn();
+
+            handleContentMessage(
+                { message: "hideSegment", UUID: "test-segment" as SegmentUUID, type: 1 },
+                null,
+                sendResponse
+            );
+
+            expect(segment.hidden).toBe(1);
+            expect(updatedEvents).toHaveLength(1);
+            expect(updatedEvents[0]).toMatchObject({
+                videoID: "BV1test",
+                UUID: "test-segment",
+                reason: "popupHide",
+            });
+            expect(updatedEvents[0].segment).toBe(segment);
             expect(sendResponse).toHaveBeenCalledWith({});
         } catch (error) {
             throw new Error(error instanceof Error ? `${error.name}: ${error.message}` : String(error));

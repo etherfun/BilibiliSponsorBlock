@@ -2,10 +2,6 @@ import Config from "../config";
 import { StorageChangesObject } from "../config/config";
 import { Message, MessageResponse } from "../messageTypes";
 import { checkPageForNewThumbnails } from "../thumbnail-utils/thumbnailManagement";
-import {
-    ActionType,
-    SponsorHideType,
-} from "../types";
 import Utils from "../utils";
 import { importTimes } from "../utils/exporter";
 import { getBilibiliVideoID } from "../utils/parseVideoID";
@@ -113,7 +109,15 @@ export function handleContentMessage(
         case "whitelistChange":
             contentState.channelWhitelisted = request.value;
             syncContentStateStore("messageHandler.whitelistChange");
-            void app.commands.execute("segments/lookup", {});
+            app.bus.emit(
+                CONTENT_EVENTS.CHANNEL_WHITELIST_CHANGED,
+                {
+                    videoID: getVideoID(),
+                    whitelisted: request.value,
+                    reason: "popupToggle",
+                },
+                { source: "messageHandler.whitelistChange" }
+            );
 
             break;
         case "submitTimes":
@@ -148,21 +152,18 @@ export function handleContentMessage(
             Promise.resolve(app.commands.execute("segment/vote", { type: request.type, UUID: request.UUID })).then(sendResponse);
             return true;
         case "hideSegment":
-            utils.getSponsorTimeFromUUID(contentState.sponsorTimes, request.UUID).hidden = request.type;
-            utils.addHiddenSegment(getVideoID(), request.UUID, request.type);
-            void app.commands.execute("ui/updatePreviewBar", undefined);
-
-            if (
-                uiState.skipButtonControlBar?.isEnabled() &&
-                contentState.sponsorTimesSubmitting.every(
-                    (s) => s.hidden !== SponsorHideType.Visible || s.actionType !== ActionType.Poi
-                )
-            ) {
+            {
+                const segment = utils.getSponsorTimeFromUUID(contentState.sponsorTimes, request.UUID);
+                segment.hidden = request.type;
+                utils.addHiddenSegment(getVideoID(), request.UUID, request.type);
+                syncContentStateStore("messageHandler.hideSegment");
                 app.bus.emit(
-                    CONTENT_EVENTS.SKIP_BUTTON_STATE_CHANGED,
+                    CONTENT_EVENTS.SEGMENT_UPDATED,
                     {
-                        enabled: false,
-                        segment: null,
+                        videoID: getVideoID(),
+                        UUID: request.UUID,
+                        segment,
+                        reason: "popupHide",
                     },
                     { source: "messageHandler.hideSegment" }
                 );

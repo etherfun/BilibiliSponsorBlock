@@ -74,12 +74,23 @@ export interface ContentEventMap {
     [CONTENT_EVENTS.VIDEO_ID_CHANGED]: { videoID: NewVideoID | null };
     [CONTENT_EVENTS.VIDEO_ELEMENT_CHANGED]: { newVideo: boolean; video: HTMLVideoElement | null };
     [CONTENT_EVENTS.VIDEO_CHANNEL_RESOLVED]: { channelIDInfo: ChannelIDInfo };
+    [CONTENT_EVENTS.CHANNEL_WHITELIST_CHANGED]: {
+        videoID: NewVideoID | null;
+        whitelisted: boolean;
+        reason: "popupToggle" | "channelResolved";
+    };
     [CONTENT_EVENTS.CONFIG_CHANGED]: { changes: StorageChangesObject };
     [CONTENT_EVENTS.SEGMENTS_LOADED]: { sponsorTimes: SponsorTime[]; status: number; videoID: NewVideoID | null };
     [CONTENT_EVENTS.SEGMENTS_SUBMITTING_CHANGED]: {
         sponsorTimesSubmitting: SponsorTime[];
         getFromConfig: boolean;
         videoID: NewVideoID | null;
+    };
+    [CONTENT_EVENTS.SEGMENT_UPDATED]: {
+        videoID: NewVideoID | null;
+        UUID: SegmentUUID;
+        segment: SponsorTime;
+        reason: "popupHide" | "voteDown" | "voteUp" | "categoryVote";
     };
     [CONTENT_EVENTS.SKIP_EXECUTED]: {
         skipTime: [number, number];
