@@ -177,6 +177,8 @@ function CommentListener() {
     document.addEventListener("visibilitychange", scan);
     addCleanupListener(() => {
         clearTimeout(timer);
+        // 页面/视频切换后旧评论的上下文不能再参与判定
+        resetAicgPeerCache();
         pageObserver.disconnect();
         document.removeEventListener("visibilitychange", scan);
         for (const { observer } of observers.values()) observer.disconnect();
@@ -502,64 +504,96 @@ function setApplied(card: HTMLElement, category: string, state: CommentAppliedSt
     else map.delete(category);
 }
 
-/** 一条评论文本容器对应的、可以插入「显示内容」按钮的位置。 */
-interface CommentTarget {
+/**
+ * 一条评论在 DOM 里的引用。
+ *
+ * 取法与上游 `SponsorComment` 完全一致（`thread.shadowRoot.querySelector("bili-comment-renderer")`、
+ * `#content`、`bili-comment-user-info` 的 `#user-up/#user-level`、`#reply`），
+ * 只是把「怎么拿到一条评论」收敛成一个函数，商品链接与 AICG 共用同一份，
+ * B 站改版时只需要改这里，不会两份选择器各改一遍。
+ */
+interface CommentNode {
     card: HTMLElement;
-    content: HTMLElement;
-    labelAnchor: HTMLElement;
-    actions: ShadowRoot | null;
+    shadow: ShadowRoot;
+    content: HTMLElement | null;
+    userInfo: ShadowRoot | undefined;
+    labelAnchor: HTMLElement | undefined;
+    actions: ShadowRoot | undefined;
     replyButton: HTMLElement | null;
-    author: string;
-    text: string;
 }
 
-/** 收集一个评论宿主下所有可处理的评论（主评论 + 子评论）。 */
-function collectCommentTargets(root: HTMLElement): CommentTarget[] {
-    const targets: CommentTarget[] = [];
+function forEachComment(root: HTMLElement, visit: (node: CommentNode) => void): void {
     const shadow = root.shadowRoot;
-    if (!shadow) return targets;
+    if (!shadow) return;
 
-    const push = (card: HTMLElement | null) => {
+    const visitCard = (card: HTMLElement | null | undefined) => {
         const cardShadow = card?.shadowRoot;
         if (!card || !cardShadow) return;
-        const content = cardShadow.querySelector<HTMLElement>("#content");
-        if (!content) return;
-
-        const userInfo = cardShadow.querySelector("bili-comment-user-info")?.shadowRoot;
-        const labelAnchor = userInfo?.querySelector<HTMLElement>("#user-up, #user-level") ?? content;
-        const actions = cardShadow.querySelector("bili-comment-action-buttons-renderer")?.shadowRoot ?? null;
-
-        targets.push({
+        const userInfo = cardShadow.querySelector("bili-comment-user-info")?.shadowRoot ?? undefined;
+        const actions = cardShadow.querySelector("bili-comment-action-buttons-renderer")?.shadowRoot ?? undefined;
+        visit({
             card,
-            content,
-            labelAnchor,
+            shadow: cardShadow,
+            content: cardShadow.querySelector<HTMLElement>("#content"),
+            userInfo,
+            labelAnchor: userInfo?.querySelector<HTMLElement>("#user-up, #user-level"),
             actions,
             replyButton: actions?.querySelector<HTMLElement>("#reply") ?? null,
-            author: readCommentAuthor(card),
-            text: readCommentText(content),
         });
     };
 
     for (const thread of shadow.querySelectorAll<HTMLElement>("bili-comment-thread-renderer")) {
         const threadShadow = thread.shadowRoot;
         if (!threadShadow) continue;
-        push(threadShadow.querySelector<HTMLElement>("bili-comment-renderer"));
+        visitCard(threadShadow.querySelector<HTMLElement>("bili-comment-renderer"));
 
         const repliesRoot = threadShadow.querySelector("bili-comment-replies-renderer")?.shadowRoot;
         if (!repliesRoot) continue;
         for (const reply of repliesRoot.querySelectorAll<HTMLElement>("bili-comment-reply-renderer")) {
-            push(reply);
+            visitCard(reply);
         }
     }
+}
 
-    return targets;
+/**
+ * 跨扫描累积的评论上下文。
+ *
+ * B 站评论区是滚动逐步加载的：一次扫描往往只有几条评论在 DOM 里，
+ * 如果只拿当前这批算「模板复用/相似度」，前期加载的评论永远没有证据。
+ * 这里把见过的评论文本按页面累积起来（去重 + 上限），
+ * 让判定在评论逐步到达时也能保持稳定。
+ */
+const PEER_CACHE_LIMIT = 400;
+const peerCache = { texts: [] as string[], authors: [] as string[], seen: new Set<string>() };
+
+export function resetAicgPeerCache(): void {
+    peerCache.texts = [];
+    peerCache.authors = [];
+    peerCache.seen.clear();
+}
+
+function rememberPeer(text: string, author: string): void {
+    if (!text) return;
+    // 同一条评论（同作者同文本）只记一次，避免滚动重渲染把权重刷高。
+    const key = `${author}\u0000${text}`;
+    if (peerCache.seen.has(key)) return;
+    peerCache.seen.add(key);
+    peerCache.texts.push(text);
+    peerCache.authors.push(author);
+    if (peerCache.texts.length > PEER_CACHE_LIMIT) {
+        const drop = peerCache.texts.length - PEER_CACHE_LIMIT;
+        peerCache.texts.splice(0, drop);
+        peerCache.authors.splice(0, drop);
+        // seen 只用于去重，超出上限时整体重建，避免无限增长。
+        peerCache.seen = new Set(peerCache.texts.map((value, index) => `${peerCache.authors[index]}\u0000${value}`));
+    }
 }
 
 /**
  * 评论区过滤：商品链接与疑似 AICG 共用同一条执行路径。
  *
- * 对每条评论分别评估两个类别，各自读自己在 `dynamicSponsorSelections` 里的选项，
- * 再复用同一套 `labelSponsorStyle` / `hideSponsorContent` 去打标签或隐藏。
+ * 判定是外置的（`content/aicg/detector`），这里只做三件事：
+ * 收集文本 -> 交给判定 -> 用同一套 `labelSponsorStyle` / `hideSponsorContent` 落地。
  */
 function SponsorComment(root: HTMLElement) {
     const goodsOption = getCategorySelection("dynamicSponsor_sponsor")?.option ?? DynamicSponsorOption.Disabled;
@@ -568,39 +602,63 @@ function SponsorComment(root: HTMLElement) {
     const aicgEnabled = aicgOption !== DynamicSponsorOption.Disabled;
     if (!goodsEnabled && !aicgEnabled) return;
 
-    const targets = collectCommentTargets(root);
-    if (!targets.length) return;
-
-    // 疑似 AICG 需要跨评论上下文，一次扫描只构建一次。
+    // 第一遍只读文本：疑似 AICG 需要跨评论上下文，一次扫描构建一次。
     const aicgDetector = aicgEnabled ? new HeuristicAicgDetector() : null;
     const aicgTuning = aicgEnabled ? getAicgTuning() : null;
-    const aicgContext = aicgEnabled
-        ? createAicgContext(
-            targets.map((target) => target.text),
-            targets.map((target) => target.author),
-        )
-        : null;
+    let aicgContext: ReturnType<typeof createAicgContext> | null = null;
+    if (aicgEnabled) {
+        forEachComment(root, (node) => {
+            if (!node.content) return;
+            rememberPeer(readCommentText(node.content), readCommentAuthor(node.card));
+        });
+        aicgContext = createAicgContext(peerCache.texts, peerCache.authors);
+    }
 
-    for (const target of targets) {
-        const whitelisted = isWhitelistedAuthor(target.author);
+    // 第二遍落地：两个类别各读自己的选项，复用同一套打标签/隐藏函数。
+    forEachComment(root, (node) => {
+        const { card, content, labelAnchor, actions, replyButton } = node;
+        if (!content) return;
+
+        const whitelisted = isWhitelistedAuthor(readCommentAuthor(card));
+        const target: CommentTarget = {
+            card,
+            content,
+            labelAnchor,
+            actions: actions ?? null,
+            replyButton,
+            author: readCommentAuthor(card),
+            text: readCommentText(content),
+        };
 
         if (goodsEnabled && !whitelisted) {
             applyGoodsCategory(target, goodsOption);
-        } else if (getApplied(target.card, "dynamicSponsor_sponsor")) {
+        } else if (getApplied(card, "dynamicSponsor_sponsor")) {
             revertCategory(target, "dynamicSponsor_sponsor");
         }
 
         if (aicgEnabled && !whitelisted && aicgDetector && aicgTuning && aicgContext) {
             applyAicgCategory(target, aicgOption, aicgDetector, aicgTuning, aicgContext);
-        } else if (getApplied(target.card, AICG_CATEGORY)) {
+        } else if (getApplied(card, AICG_CATEGORY)) {
             // 类别被关掉后，把之前加上的标签/隐藏效果回滚，避免设置改了页面没变。
             revertCategory(target, AICG_CATEGORY);
         }
-    }
+    });
 
     if (Config.config.commentSponsorReplyBlock && goodsEnabled) {
         hideGoodsReplyThreads(root);
     }
+}
+
+/** 应用阶段需要的引用（文本与作者只读一次，避免每条评论重复遍历 DOM）。 */
+interface CommentTarget {
+    card: HTMLElement;
+    content: HTMLElement;
+    /** 上游用的标签锚点（用户信息区的 #user-up/#user-level）；子评论可能没有 */
+    labelAnchor: HTMLElement | null;
+    actions: ShadowRoot | null;
+    replyButton: HTMLElement | null;
+    author: string;
+    text: string;
 }
 
 /** 白名单作者默认跳过；开启「无视白名单」后不再跳过。 */
@@ -696,8 +754,9 @@ function ensureLabel(
     category: string,
     debugMode: boolean,
     debugText?: string[] | null,
+    anchor: HTMLElement | null = target.labelAnchor ?? target.content,
 ): void {
-    const anchor = target.labelAnchor;
+    if (!anchor) return;
     const scope = (anchor.parentElement as ParentNode | null)
         ?? (anchor.getRootNode() instanceof ShadowRoot ? (anchor.getRootNode() as ParentNode) : null);
     if (!scope || scope.querySelector(`#${labelId}`)) return;

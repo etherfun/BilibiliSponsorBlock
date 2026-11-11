@@ -390,6 +390,32 @@ function migrateOldSyncFormats(config: SBConfig, initialSyncKeys: ReadonlySet<st
         config["commentAicgMinLength"] = syncDefaults.commentAicgMinLength;
     }
 
+    // 已有的 dynamicSponsorSelections 是在旧版本里写过盘的数组，addDefaults 只看「键存不存在」，
+    // 不会把新增的类别补进去。这里按名字合并一次，保证新类别（如 dynamicSponsor_aicg）
+    // 对老用户也真实存在——否则 getAicgOption() 永远读到「禁用」，功能看起来完全没生效。
+    // 只有确实补了东西才写回，避免每次启动都重写一遍存储。
+    if (Array.isArray(config["dynamicSponsorSelections"])) {
+        const current = config["dynamicSponsorSelections"];
+        const missing = syncDefaults.dynamicSponsorSelections.filter(
+            (fallback) => !current.some((selection) => selection?.name === fallback.name),
+        );
+        if (missing.length > 0) {
+            config["dynamicSponsorSelections"] = [...current, ...missing.map((fallback) => ({ ...fallback }))];
+        }
+    }
+
+    // dynamicSponsorTypes 同理：缺了键就没有 --sb-category-* 颜色变量，标签会变成白底白图标。
+    if (config["dynamicSponsorTypes"] && typeof config["dynamicSponsorTypes"] === "object") {
+        const types = config["dynamicSponsorTypes"] as Record<string, PreviewBarOption>;
+        const missingTypes = Object.entries(syncDefaults.dynamicSponsorTypes)
+            .filter(([name]) => !types[name]);
+        if (missingTypes.length > 0) {
+            const merged = { ...types };
+            for (const [name, fallback] of missingTypes) merged[name] = { ...fallback };
+            config["dynamicSponsorTypes"] = merged as typeof config["dynamicSponsorTypes"];
+        }
+    }
+
     // 旧版把 AICG 处理方式单独存成 commentAicgAction（0 禁用 / 1 标签 / 2 隐藏内容 / 3 隐藏卡片）。
     // 现在它属于动态类别表，这里做一次性迁移，避免已经设过的人静默丢失设置。
     const legacyAicgAction = config["commentAicgAction"];

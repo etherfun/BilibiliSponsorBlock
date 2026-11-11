@@ -131,6 +131,42 @@ test("旧的独立设置会被迁移到类别表", async ({ extensionId, extensi
     await expect.poll(() => readSyncStorage<unknown>(extensionServiceWorker, "commentAicgAction")).toBeUndefined();
 });
 
+test("老用户配置里没有该类别时，启动后自动补齐，选完模式立刻能生效", async ({ extensionId, extensionPage: page, extensionServiceWorker }) => {
+    // 精确复现线上问题：已有配置里只有三个商品链接类别（旧版本写下的数组），
+    // addDefaults 只看「键是否存在」，不会补新类别，于是 getAicgOption() 永远读到禁用。
+    await writeSyncStorage(extensionServiceWorker, {
+        dynamicAndCommentSponsorBlocker: true,
+        commentSponsorBlock: true,
+        dynamicSponsorSelections: [
+            { name: "dynamicSponsor_sponsor", option: 2 },
+            { name: "dynamicSponsor_forward_sponsor", option: 2 },
+            { name: "dynamicSponsor_suspicion_sponsor", option: 0 },
+        ],
+        dynamicSponsorTypes: {
+            dynamicSponsor_sponsor: { color: "#007800", opacity: "0.7" },
+            dynamicSponsor_forward_sponsor: { color: "#bfbf35", opacity: "0.7" },
+            dynamicSponsor_suspicion_sponsor: { color: "#a6634a", opacity: "0.7" },
+        },
+    });
+
+    await openBehaviorOptions(page, extensionId);
+
+    // 类别行存在，且默认是禁用
+    await expect(page.locator(AICG_ROW)).toBeVisible();
+    await expect(page.locator(AICG_SELECT)).toHaveValue("disable");
+
+    // 选择处理方式后被真正写进存储（而不是只改 UI）
+    await page.locator(AICG_SELECT).selectOption("HideCard_DynamicSponsor");
+    await expect.poll(async () => (await readSelections(extensionServiceWorker))
+        .find((entry) => entry.name === "dynamicSponsor_aicg")?.option).toBe(3);
+
+    // 颜色变量也要有，否则标签是白底白图标
+    const color = await readSyncStorage<Record<string, { color: string }>>(
+        extensionServiceWorker, "dynamicSponsorTypes",
+    );
+    expect(color?.dynamicSponsor_aicg?.color).toBeTruthy();
+});
+
 test("截图存档：设置界面", async ({ extensionId, extensionPage: page, extensionServiceWorker }) => {
     await enableCategory(extensionServiceWorker, 1);
     await writeSyncStorage(extensionServiceWorker, { commentAicgDebug: true });

@@ -319,13 +319,17 @@ class DynamicSponsorHideOptionsComponent extends React.Component<CategorySkipOpt
      * 类别行下方挂载的附加设置。
      * 与 `CategorySkipOptionsComponent.getExtraOptionComponents` 同构：
      * 「疑似 AICG 内容」的阈值/最小长度/调试开关直接长在它自己的类别行下面，
-     * 不另起一块独立设置。
+     * 不另起一块独立设置。类别处于「禁用」时不显示，避免看起来像已经配好了。
      */
     getExtraOptionComponents(category: string): JSX.Element[] {
         const result: JSX.Element[] = [];
+        const enabled = (Config.config.dynamicSponsorSelections.find(
+            (selection) => selection.name === category,
+        )?.option ?? DynamicSponsorOption.Disabled) !== DynamicSponsorOption.Disabled;
+
         for (const option of this.getExtraOptions(category)) {
             result.push(
-                <tr key={option.configKey}>
+                <tr key={option.configKey} className={enabled ? undefined : "hidden"}>
                     <td id={`${category}_${option.configKey}`} className="categoryExtraOptions" colSpan={3}>
                         {option.type === "number" ? (
                             <label className="number-container">
@@ -423,6 +427,8 @@ class DynamicSponsorHideOptionsComponent extends React.Component<CategorySkipOpt
         }
 
         Config.forceSyncUpdate("dynamicSponsorSelections");
+        // 附加设置是否显示取决于这一行的选项，切完要重绘。
+        this.forceUpdate();
     }
 
     getCategorySkipOptions(): JSX.Element[] {
