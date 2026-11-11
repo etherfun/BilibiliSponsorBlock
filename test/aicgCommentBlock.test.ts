@@ -295,6 +295,47 @@ describe("疑似 AICG 类别", () => {
         expect(f.cards[0].style.display).toBe("");
         expect(labelIn(f.users, "commentAicgLabel")).toHaveLength(0);
     });
+    test("打开「显示命中特征」时在评论区顶部显示自检信息", () => {
+        setAicg(DynamicSponsorOption.ShowOverlay);
+        Config.config.commentAicgDebug = true;
+        const f = fixture(Array.from({ length: 6 }, (_, i) => templateComment("owner", i)));
+        CommentListener();
+        jest.advanceTimersByTime(6000);
+
+        const status = f.root.shadowRoot.querySelector("#aicgScanStatus");
+        expect(status).not.toBeNull();
+        expect(status.textContent).toContain("已扫描 6 条评论");
+        expect(status.textContent).toContain("命中 6 条");
+        // 阈值与最小长度也一并显示，便于用户判断是不是阈值太高
+        expect(status.textContent).toContain("0.55");
+        expect(status.textContent).toContain("12");
+    });
+
+    test("未打开调试时不显示自检信息", () => {
+        setAicg(DynamicSponsorOption.ShowOverlay);
+        const f = fixture(Array.from({ length: 6 }, (_, i) => templateComment("owner", i)));
+        CommentListener();
+        jest.advanceTimersByTime(6000);
+        expect(f.root.shadowRoot.querySelector("#aicgScanStatus")).toBeNull();
+    });
+
+    test("自检信息能反映「扫到了但没命中」", () => {
+        setAicg(DynamicSponsorOption.ShowOverlay);
+        Config.config.commentAicgDebug = true;
+        // 真人风格评论，彼此不相似：应当扫到但命中 0
+        const texts = [
+            HUMAN_COMMENT,
+            "我上周也遇到过，重装一下插件就好了，不过记得先导出配置。",
+            "这个功能在手机上确实不好用，我一般用电脑看。",
+        ];
+        const f = fixture(texts);
+        CommentListener();
+        jest.advanceTimersByTime(6000);
+
+        const status = f.root.shadowRoot.querySelector("#aicgScanStatus");
+        expect(status.textContent).toContain("已扫描 3 条评论");
+        expect(status.textContent).toContain("命中 0 条");
+    });
 });
 
 describe("与商品链接类别共存", () => {

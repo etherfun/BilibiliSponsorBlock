@@ -132,7 +132,12 @@ function CommentListener() {
             if (!shadow) return;
             if (observers.get(host)?.shadow !== shadow) {
                 observers.get(host)?.observer.disconnect();
-                const observer = new MutationObserver(scan);
+                // 自检信息本身写在被观察的 shadow root 里，它的变化不能再触发扫描，
+                // 否则「扫描 -> 更新自检文字 -> 触发扫描」会自我循环。
+                const observer = new MutationObserver((records) => {
+                    if (records.every((record) => isAicgStatusMutation(record))) return;
+                    scan();
+                });
                 observer.observe(shadow, {
                     childList: true,
                     subtree: true,
@@ -480,6 +485,8 @@ const wiredReplyButtons = new WeakSet<HTMLButtonElement>();
 interface CommentAppliedState {
     option: DynamicSponsorOption;
     text: string;
+    /** 上次判定得到的疑似度，供自检统计复用（避免为统计重复跑检测） */
+    confidence?: number;
 }
 
 /** 每个类别在 DOM 上留下的标记，回滚时据此认定「这是我干的」。 */
@@ -615,6 +622,10 @@ function SponsorComment(root: HTMLElement) {
     }
 
     // 第二遍落地：两个类别各读自己的选项，复用同一套打标签/隐藏函数。
+    const stats: AicgScanStats | null = aicgTuning?.debug
+        ? { scanned: 0, eligible: 0, hits: 0, top: 0, threshold: aicgTuning.threshold, minLength: aicgTuning.minLength }
+        : null;
+
     forEachComment(root, (node) => {
         const { card, content, labelAnchor, actions, replyButton } = node;
         if (!content) return;
@@ -637,16 +648,88 @@ function SponsorComment(root: HTMLElement) {
         }
 
         if (aicgEnabled && !whitelisted && aicgDetector && aicgTuning && aicgContext) {
-            applyAicgCategory(target, aicgOption, aicgDetector, aicgTuning, aicgContext);
+            applyAicgCategory(target, aicgOption, aicgDetector, aicgTuning, aicgContext, stats ?? undefined);
         } else if (getApplied(card, AICG_CATEGORY)) {
             // 类别被关掉后，把之前加上的标签/隐藏效果回滚，避免设置改了页面没变。
             revertCategory(target, AICG_CATEGORY);
         }
     });
 
+    if (stats) renderAicgScanStatus(root, stats);
+
     if (Config.config.commentSponsorReplyBlock && goodsEnabled) {
         hideGoodsReplyThreads(root);
     }
+}
+
+/** 自检统计：让用户能区分「没扫到」和「扫了但没命中」。 */
+interface AicgScanStats {
+    scanned: number;
+    eligible: number;
+    hits: number;
+    top: number;
+    threshold: number;
+    minLength: number;
+}
+
+const AICG_STATUS_ID = "aicgScanStatus";
+
+/** 这条 mutation 是否只是自检信息自己的变化（是则不该触发重新扫描）。 */
+function isAicgStatusMutation(record: MutationRecord): boolean {
+    if (record.target instanceof Element) {
+        if (record.target.id === AICG_STATUS_ID) return true;
+        return Boolean(record.target.closest(`#${AICG_STATUS_ID}`));
+    }
+    const parent = record.target.parentElement;
+    if (parent) {
+        if (parent.id === AICG_STATUS_ID) return true;
+        return Boolean(parent.closest(`#${AICG_STATUS_ID}`));
+    }
+    return false;
+}
+
+/**
+ * 在评论区顶部显示一行自检信息（仅在「显示命中特征」打开时）。
+ *
+ * 没有这行字，用户只能看到「没有任何标签」，无法判断是
+ * 评论没加载 / 类别没生效 / 阈值太高，排查只能靠猜。
+ */
+function renderAicgScanStatus(root: HTMLElement, stats: AicgScanStats): void {
+    const shadow = root.shadowRoot;
+    if (!shadow) return;
+
+    const text =
+        `疑似 AICG 自检：已扫描 ${stats.scanned} 条评论`
+        + `（其中 ${stats.eligible} 条够长参与判定）`
+        + `，命中 ${stats.hits} 条`
+        + `\n最高疑似度 ${stats.top.toFixed(2)} / 当前阈值 ${stats.threshold} / 最小长度 ${stats.minLength}`;
+
+    let element = shadow.querySelector<HTMLElement>(`#${AICG_STATUS_ID}`);
+    if (!element) {
+        element = document.createElement("div");
+        element.id = AICG_STATUS_ID;
+        element.style.cssText = [
+            "margin:8px 0",
+            "padding:6px 10px",
+            "border-radius:6px",
+            "font-size:12px",
+            "line-height:1.6",
+            "background:rgba(142,45,226,.12)",
+            "border:1px solid rgba(142,45,226,.5)",
+            "color:inherit",
+            "white-space:pre-line",
+        ].join(";");
+        element.dataset.value = text;
+        element.textContent = text;
+        shadow.insertBefore(element, shadow.firstChild);
+        return;
+    }
+
+    // 内容没变就不要再写 DOM：写 textContent 会产生 childList 变更，
+    // 又触发我们自己的扫描、再写一次，不挡住会变成无限扫描循环（实测能卡死页面）。
+    if (element.dataset.value === text) return;
+    element.dataset.value = text;
+    element.textContent = text;
 }
 
 /** 应用阶段需要的引用（文本与作者只读一次，避免每条评论重复遍历 DOM）。 */
@@ -701,19 +784,33 @@ function applyAicgCategory(
     detector: HeuristicAicgDetector,
     tuning: ReturnType<typeof getAicgTuning>,
     context: ReturnType<typeof createAicgContext>,
+    stats?: AicgScanStats,
 ): void {
+    if (stats) stats.scanned++;
+
     // 过短的评论不参与判定，也不改动 DOM。
     const body = normalizeCommentText(stripMentionPrefix(target.text));
     if (!body || codePointLength(body) < tuning.minLength) return;
+    if (stats) stats.eligible++;
 
     const applied = getApplied(target.card, AICG_CATEGORY);
-    if (applied?.option === option && applied.text === body) return;
+    if (applied?.option === option && applied.text === body) {
+        // 已经处理过：不重复跑检测，但自检统计仍要把这条算上，
+        // 否则第二次扫描会把「命中」显示成 0，看起来像完全没生效。
+        if (stats) {
+            stats.top = Math.max(stats.top, applied.confidence ?? 0);
+            if (applied.option !== DynamicSponsorOption.Disabled) stats.hits++;
+        }
+        return;
+    }
 
     const result = detector.detect(
         { text: target.text, minDetectableLength: tuning.minLength, peers: [], author: target.author },
         context,
     );
+    if (stats) stats.top = Math.max(stats.top, result.confidence);
     const decision = decideAicgOption(result, option, tuning);
+    if (stats && decision.option !== DynamicSponsorOption.Disabled) stats.hits++;
 
     if (decision.option === DynamicSponsorOption.Disabled) {
         // 之前命中过、这次不命中（例如阈值调高了），要把旧效果撤掉。
@@ -744,7 +841,7 @@ function applyAicgCategory(
         target.content.setAttribute(AICG_CONTENT_HIDDEN_ATTR, "true");
     }
 
-    setApplied(target.card, AICG_CATEGORY, { option: decision.option, text: body });
+    setApplied(target.card, AICG_CATEGORY, { option: decision.option, text: body, confidence: result.confidence });
 }
 
 /** 打标签；标签是插在锚点元素后面的兄弟节点，所以查重要在锚点父级里做。 */
