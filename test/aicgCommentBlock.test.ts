@@ -336,6 +336,76 @@ describe("疑似 AICG 类别", () => {
         expect(status.textContent).toContain("已扫描 3 条评论");
         expect(status.textContent).toContain("命中 0 条");
     });
+    test("自检信息会带上正文样例，便于判断是不是正文没读到", () => {
+        setAicg(DynamicSponsorOption.ShowOverlay);
+        Config.config.commentAicgDebug = true;
+        const f = fixture(Array.from({ length: 6 }, (_, i) => templateComment("owner", i)));
+        CommentListener();
+        jest.advanceTimersByTime(6000);
+
+        const status = f.root.shadowRoot.querySelector("#aicgScanStatus");
+        expect(status.textContent).toContain("正文为空 0 条");
+        expect(status.textContent).toContain("样例：");
+        expect(status.textContent).toContain("新版跟源仓库彻底隔离");
+    });
+
+    test("正文在 light DOM（slot 组合）时也能读到", () => {
+        // 复现真实站点可能的结构：bili-rich-text 的 shadowRoot 里只有一个空的 slot，
+        // 正文写在 light DOM 中。只走 shadowRoot 会读出空串。
+        const root = component("bili-comments", document.body, '<div id="feed"></div>');
+        const thread = component("bili-comment-thread-renderer", root.shadowRoot.querySelector("#feed"));
+        const card = component("bili-comment-renderer", thread.shadowRoot, '<div id="content"></div>');
+        const content = card.shadowRoot.querySelector<HTMLElement>("#content");
+        const rich = component("bili-rich-text", content);
+        // 正文放 light DOM；shadow 里只有 slot
+        const span = document.createElement("span");
+        span.textContent = "light-dom 里的正文内容，长度足够参与判定。";
+        rich.appendChild(span);
+        rich.shadowRoot.innerHTML = '<div id="contents"><slot></slot></div>';
+        component("bili-comment-user-info", card.shadowRoot, '<span id="user-level">Lv6</span>');
+        component("bili-comment-action-buttons-renderer", card.shadowRoot, '<button id="reply">reply</button>');
+
+        setAicg(DynamicSponsorOption.ShowOverlay);
+        Config.config.commentAicgDebug = true;
+        CommentListener();
+        jest.advanceTimersByTime(6000);
+
+        const status = root.shadowRoot.querySelector("#aicgScanStatus");
+        expect(status.textContent).toContain("正文为空 0 条");
+        expect(status.textContent).toContain("light-dom 里的正文内容");
+    });
+    test("自检信息在「评论太少」时直接给出可操作提示", () => {
+        setAicg(DynamicSponsorOption.ShowOverlay);
+        Config.config.commentAicgDebug = true;
+        // 只有一条评论：必然没有跨评论证据，最高疑似度必然是 0
+        const f = fixture([HUMAN_COMMENT]);
+        CommentListener();
+        jest.advanceTimersByTime(6000);
+
+        const status = f.root.shadowRoot.querySelector("#aicgScanStatus");
+        expect(status.textContent).toContain("单条最多命中特征");
+        expect(status.textContent).toContain("无法形成跨评论证据");
+    });
+
+    test("自检信息在「有证据但低于阈值」时给出建议阈值", () => {
+        setAicg(DynamicSponsorOption.ShowOverlay);
+        Config.config.commentAicgDebug = true;
+        Config.config.commentAicgThreshold = 0.99;
+        // 三条模板 + 三条互不相关：有跨评论证据但强度不足以到 0.99
+        const f = fixture([
+            templateComment("owner", 0),
+            templateComment("owner", 1),
+            templateComment("owner", 2),
+            HUMAN_COMMENT,
+            "我上周也遇到过，重装一下插件就好了，不过记得先导出配置。",
+            "这个功能在手机上确实不好用，我一般用电脑看。",
+        ]);
+        CommentListener();
+        jest.advanceTimersByTime(6000);
+
+        const status = f.root.shadowRoot.querySelector("#aicgScanStatus");
+        expect(status.textContent).toContain("低于阈值 0.99");
+    });
 });
 
 describe("与商品链接类别共存", () => {

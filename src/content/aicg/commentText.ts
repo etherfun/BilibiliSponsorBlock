@@ -24,11 +24,14 @@ export function readCommentText(content: HTMLElement | null | undefined): string
         if (SKIPPED_CLASSES.some((name) => node.classList?.contains(name))) return;
         if (node.getAttribute("data-e2e") === "comment-expand") return;
 
-        // 有 shadowRoot 时正文在那里；否则读 light DOM。
+        // 有 shadowRoot 时正文通常在那里；但如果组件用 <slot> 组合，
+        // 正文其实在 light DOM 里，shadow 里只有一个空的 slot 元素，
+        // 这时必须再回到 light DOM 找，否则读出来是空串（真实站点就踩过）。
         const shadow = node.shadowRoot;
         if (shadow && shadow.childNodes.length) {
+            const before = parts.length;
             for (const child of Array.from(shadow.childNodes)) walk(child);
-            return;
+            if (parts.length > before) return;
         }
         for (const child of Array.from(node.childNodes)) walk(child);
     };

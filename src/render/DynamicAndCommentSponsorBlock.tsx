@@ -487,6 +487,8 @@ interface CommentAppliedState {
     text: string;
     /** 上次判定得到的疑似度，供自检统计复用（避免为统计重复跑检测） */
     confidence?: number;
+    /** 上次命中的证据特征数，同样是为了自检统计 */
+    featureCount?: number;
 }
 
 /** 每个类别在 DOM 上留下的标记，回滚时据此认定「这是我干的」。 */
@@ -623,7 +625,7 @@ function SponsorComment(root: HTMLElement) {
 
     // 第二遍落地：两个类别各读自己的选项，复用同一套打标签/隐藏函数。
     const stats: AicgScanStats | null = aicgTuning?.debug
-        ? { scanned: 0, eligible: 0, hits: 0, top: 0, threshold: aicgTuning.threshold, minLength: aicgTuning.minLength }
+        ? { scanned: 0, eligible: 0, empty: 0, peers: peerCache.texts.length, featureMax: 0, hits: 0, top: 0, threshold: aicgTuning.threshold, minLength: aicgTuning.minLength }
         : null;
 
     forEachComment(root, (node) => {
@@ -666,6 +668,17 @@ function SponsorComment(root: HTMLElement) {
 interface AicgScanStats {
     scanned: number;
     eligible: number;
+    /** 正文读出来是空串的条数（DOM 选择器失效时会全部为空） */
+    empty: number;
+    /** 最短/最长正文长度，用来判断是不是都被最小长度挡住了 */
+    shortest?: number;
+    longest?: number;
+    /** 第一条非空正文的样例，用来确认读到的到底是什么 */
+    sample?: string;
+    /** 跨扫描累积到的评论条数：只有 1~2 条时必然没有跨评论证据 */
+    peers: number;
+    /** 单条评论最多命中的证据特征数，用来区分「没证据」和「证据被闸门压掉」 */
+    featureMax: number;
     hits: number;
     top: number;
     threshold: number;
@@ -700,9 +713,36 @@ function renderAicgScanStatus(root: HTMLElement, stats: AicgScanStats): void {
 
     const text =
         `疑似 AICG 自检：已扫描 ${stats.scanned} 条评论`
-        + `（其中 ${stats.eligible} 条够长参与判定）`
+        + `，正文为空 ${stats.empty} 条`
+        + `，够长参与判定 ${stats.eligible} 条`
         + `，命中 ${stats.hits} 条`
-        + `\n最高疑似度 ${stats.top.toFixed(2)} / 当前阈值 ${stats.threshold} / 最小长度 ${stats.minLength}`;
+        + `\n上下文累积 ${stats.peers} 条 / 单条最多命中特征 ${stats.featureMax} 项`
+        + `\n最高疑似度 ${stats.top.toFixed(2)} / 当前阈值 ${stats.threshold} / 最小长度 ${stats.minLength}`
+        + (stats.shortest !== undefined && stats.shortest !== null
+            ? `\n正文长度 ${stats.shortest}~${stats.longest}`
+            : "")
+        + (stats.sample ? `\n样例：${stats.sample}` : "");
+
+    // 直接给出「接下来该看哪里」的提示，省得用户对着数字猜。
+    let hint = "";
+    if (stats.scanned === 0) {
+        hint = "→ 没有扫到任何评论，评论区可能还没加载出来。";
+    } else if (stats.empty === stats.scanned) {
+        hint = "→ 正文没读到，可能是 B 站评论结构变了（请把这行反馈给我）。";
+    } else if (stats.eligible === 0) {
+        hint = `→ 评论都短于最小长度 ${stats.minLength}，把「最小检测长度」调小试试。`;
+    } else if (stats.peers < 3) {
+        hint = "→ 上下文只有很少几条评论，无法形成跨评论证据；把评论区往下滚、多加载几条再看。";
+    } else if (stats.featureMax === 0) {
+        hint = "→ 该批评论没有触发任何特征：它们大概率不是同一套模板/AI 文本。";
+    } else if (stats.top === 0) {
+        hint = "→ 命中了弱特征，但缺少跨评论证据（评论之间不相似），按设计不会标记。";
+    } else if (stats.hits === 0) {
+        const suggested = Math.max(0.05, Math.floor((stats.top - 0.05) * 20) / 20);
+        hint = `→ 有证据但最高只有 ${stats.top.toFixed(2)}，低于阈值 ${stats.threshold}；把阈值调到 ${suggested.toFixed(2)} 左右试试。`;
+    }
+
+    const fullText = hint ? `${text}\n${hint}` : text;
 
     let element = shadow.querySelector<HTMLElement>(`#${AICG_STATUS_ID}`);
     if (!element) {
@@ -719,17 +759,17 @@ function renderAicgScanStatus(root: HTMLElement, stats: AicgScanStats): void {
             "color:inherit",
             "white-space:pre-line",
         ].join(";");
-        element.dataset.value = text;
-        element.textContent = text;
+        element.dataset.value = fullText;
+        element.textContent = fullText;
         shadow.insertBefore(element, shadow.firstChild);
         return;
     }
 
     // 内容没变就不要再写 DOM：写 textContent 会产生 childList 变更，
     // 又触发我们自己的扫描、再写一次，不挡住会变成无限扫描循环（实测能卡死页面）。
-    if (element.dataset.value === text) return;
-    element.dataset.value = text;
-    element.textContent = text;
+    if (element.dataset.value === fullText) return;
+    element.dataset.value = fullText;
+    element.textContent = fullText;
 }
 
 /** 应用阶段需要的引用（文本与作者只读一次，避免每条评论重复遍历 DOM）。 */
@@ -790,6 +830,15 @@ function applyAicgCategory(
 
     // 过短的评论不参与判定，也不改动 DOM。
     const body = normalizeCommentText(stripMentionPrefix(target.text));
+    if (stats) {
+        const raw = (target.text ?? "").trim();
+        if (!raw) stats.empty++;
+        else {
+            stats.shortest = stats.shortest === undefined ? codePointLength(body) : Math.min(stats.shortest, codePointLength(body));
+            stats.longest = stats.longest === undefined ? codePointLength(body) : Math.max(stats.longest, codePointLength(body));
+            if (!stats.sample) stats.sample = `${raw.slice(0, 40)}${raw.length > 40 ? "…" : ""}`;
+        }
+    }
     if (!body || codePointLength(body) < tuning.minLength) return;
     if (stats) stats.eligible++;
 
@@ -799,6 +848,7 @@ function applyAicgCategory(
         // 否则第二次扫描会把「命中」显示成 0，看起来像完全没生效。
         if (stats) {
             stats.top = Math.max(stats.top, applied.confidence ?? 0);
+            stats.featureMax = Math.max(stats.featureMax, applied.featureCount ?? 0);
             if (applied.option !== DynamicSponsorOption.Disabled) stats.hits++;
         }
         return;
@@ -808,7 +858,10 @@ function applyAicgCategory(
         { text: target.text, minDetectableLength: tuning.minLength, peers: [], author: target.author },
         context,
     );
-    if (stats) stats.top = Math.max(stats.top, result.confidence);
+    if (stats) {
+        stats.top = Math.max(stats.top, result.confidence);
+        stats.featureMax = Math.max(stats.featureMax, result.features.length);
+    }
     const decision = decideAicgOption(result, option, tuning);
     if (stats && decision.option !== DynamicSponsorOption.Disabled) stats.hits++;
 
@@ -841,7 +894,7 @@ function applyAicgCategory(
         target.content.setAttribute(AICG_CONTENT_HIDDEN_ATTR, "true");
     }
 
-    setApplied(target.card, AICG_CATEGORY, { option: decision.option, text: body, confidence: result.confidence });
+    setApplied(target.card, AICG_CATEGORY, { option: decision.option, text: body, confidence: result.confidence, featureCount: result.features.length });
 }
 
 /** 打标签；标签是插在锚点元素后面的兄弟节点，所以查重要在锚点父级里做。 */
