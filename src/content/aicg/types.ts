@@ -18,6 +18,9 @@ export type AicgFeatureId =
     | "punctuationRegularity"
     | "lowInformationDensity"
     | "personaSelfReference"
+    | "ownerAddress"
+    | "actionNarration"
+    | "promoInstruction"
     | "reportToOwner"
     | "aiPhraseDensity";
 

@@ -186,3 +186,46 @@ const AI_BOILERPLATE_RE = /综上所述|总而言之|总的来说|简而言之|�
 export function hasAiBoilerplate(text: string): boolean {
     return AI_BOILERPLATE_RE.test(text);
 }
+
+/**
+ * 人设自称。这类「非人类身份的第一人称」是 AI 助手扮演人设的直接痕迹，
+ * 而且**不依赖评论区里有没有同类评论**——单条就能成立。
+ *
+ * 注意排除「本人」「本视频」这类正常说法。
+ */
+const PERSONA_SELF_RE = /本鲸|本鱼|本喵|本汪|本狐|本猫|本助手|本AI|本ai|僕|人家(?=[^\s，。！？、；：]*(?:记|觉|也|今天|来|去|看|跑|的|想|不|帮))/g;
+export function countPersonaSelfReference(text: string): number {
+    return (text ?? "").match(PERSONA_SELF_RE)?.length ?? 0;
+}
+
+/**
+ * 称呼用户为「主人」。AI 助手人设的典型称呼，真人讨论插件时极少这样写。
+ * 排除「主人翁」这种固定词。
+ */
+const OWNER_ADDRESS_RE = /主人(?!翁)/g;
+export function countOwnerAddress(text: string): number {
+    return (text ?? "").match(OWNER_ADDRESS_RE)?.length ?? 0;
+}
+
+/**
+ * 括号里的动作/神态描写，例如「（尾巴慢悠悠划了个小圈）」「（把分支名记进本子）」。
+ * 这是角色扮演式生成的典型输出，真人写评论很少带舞台指示。
+ */
+const NARRATION_RE = /[（(][^）)]{4,40}[）)]/g;
+const NARRATION_ACTION_RE = /尾巴|鳍|耳朵|头|眼|爪子|记下|点头|叹气|竖起|竖起|甩|划|蹭|瞟|歪|蹭了蹭|装|掏出|翻开|记进|小声|沉默|认真|歪了歪/;
+export function hasActionNarration(text: string): boolean {
+    const source = text ?? "";
+    const parens = source.match(NARRATION_RE);
+    if (!parens) return false;
+    return parens.some((part) => NARRATION_ACTION_RE.test(part));
+}
+
+/**
+ * 安装/推广指令：「装填 @xxx」「包名带版本号」「先卸旧版」「第三方包」。
+ * 评论区里贴安装步骤属于推广行为，和「AI 生成」是两件事，
+ * 但组合起来是批量刷屏评论的典型形态。
+ */
+const PROMO_INSTRUCTION_RE = /装填|安装时填|包名|先卸旧版|第三方包|装前先看|插件名记得带|填\s*@[\w-]+\/[\w-]+/;
+export function hasPromoInstruction(text: string): boolean {
+    return PROMO_INSTRUCTION_RE.test(text ?? "");
+}

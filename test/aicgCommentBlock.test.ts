@@ -384,7 +384,9 @@ describe("疑似 AICG 类别", () => {
 
         const status = f.root.shadowRoot.querySelector("#aicgScanStatus");
         expect(status.textContent).toContain("单条最多命中特征");
-        expect(status.textContent).toContain("无法形成跨评论证据");
+        // 没有标记、也凑不出跨评论证据 -> 提示用户多加载评论
+        expect(status.textContent).toContain("其中标记 0 个");
+        expect(status.textContent).toContain("跨评论证据");
     });
 
     test("自检信息在「有证据但低于阈值」时给出建议阈值", () => {

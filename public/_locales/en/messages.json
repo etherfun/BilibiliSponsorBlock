@@ -2871,5 +2871,14 @@
     },
     "aicgFeature_aiPhraseDensity": {
         "message": "Boilerplate phrase density"
+    },
+    "aicgFeature_actionNarration": {
+        "message": "Stage direction in parentheses"
+    },
+    "aicgFeature_promoInstruction": {
+        "message": "Install or promotion instructions"
+    },
+    "aicgFeature_ownerAddress": {
+        "message": "Addresses the user as master"
     }
 }

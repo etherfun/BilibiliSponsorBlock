@@ -9,6 +9,7 @@ import { getEffectiveSponsorRegexRules } from "../config/sponsorRegexOTA";
 import { AICG_CATEGORY, getAicgOption, getAicgTuning, isAicgEnabled, shouldProcessComments } from "../content/aicg/settings";
 import { createAicgContext, HeuristicAicgDetector } from "../content/aicg/detector";
 import { decideAicgOption, summarizeFeatures } from "../content/aicg/decision";
+import type { AicgFeatureId } from "../content/aicg/types";
 import { readCommentAuthor, readCommentText } from "../content/aicg/commentText";
 import { codePointLength, normalizeCommentText, stripMentionPrefix } from "../content/aicg/text";
 
@@ -625,7 +626,7 @@ function SponsorComment(root: HTMLElement) {
 
     // 第二遍落地：两个类别各读自己的选项，复用同一套打标签/隐藏函数。
     const stats: AicgScanStats | null = aicgTuning?.debug
-        ? { scanned: 0, eligible: 0, empty: 0, peers: peerCache.texts.length, featureMax: 0, hits: 0, top: 0, threshold: aicgTuning.threshold, minLength: aicgTuning.minLength }
+        ? { scanned: 0, eligible: 0, empty: 0, peers: peerCache.texts.length, featureMax: 0, markerMax: 0, hits: 0, top: 0, threshold: aicgTuning.threshold, minLength: aicgTuning.minLength }
         : null;
 
     forEachComment(root, (node) => {
@@ -679,6 +680,8 @@ interface AicgScanStats {
     peers: number;
     /** 单条评论最多命中的证据特征数，用来区分「没证据」和「证据被闸门压掉」 */
     featureMax: number;
+    /** 单条评论最多出现几个「标记」特征（人设/称呼/动作/推广） */
+    markerMax: number;
     hits: number;
     top: number;
     threshold: number;
@@ -686,6 +689,14 @@ interface AicgScanStats {
 }
 
 const AICG_STATUS_ID = "aicgScanStatus";
+
+/** 与检测器里的「标记特征」保持一致的集合，仅用于自检统计显示。 */
+const AICG_MARKER_FEATURES = new Set<AicgFeatureId>([
+    "personaSelfReference",
+    "ownerAddress",
+    "actionNarration",
+    "promoInstruction",
+]);
 
 /** 这条 mutation 是否只是自检信息自己的变化（是则不该触发重新扫描）。 */
 function isAicgStatusMutation(record: MutationRecord): boolean {
@@ -716,7 +727,7 @@ function renderAicgScanStatus(root: HTMLElement, stats: AicgScanStats): void {
         + `，正文为空 ${stats.empty} 条`
         + `，够长参与判定 ${stats.eligible} 条`
         + `，命中 ${stats.hits} 条`
-        + `\n上下文累积 ${stats.peers} 条 / 单条最多命中特征 ${stats.featureMax} 项`
+        + `\n上下文累积 ${stats.peers} 条 / 单条最多命中特征 ${stats.featureMax} 项 / 其中标记 ${stats.markerMax} 个`
         + `\n最高疑似度 ${stats.top.toFixed(2)} / 当前阈值 ${stats.threshold} / 最小长度 ${stats.minLength}`
         + (stats.shortest !== undefined && stats.shortest !== null
             ? `\n正文长度 ${stats.shortest}~${stats.longest}`
@@ -731,12 +742,16 @@ function renderAicgScanStatus(root: HTMLElement, stats: AicgScanStats): void {
         hint = "→ 正文没读到，可能是 B 站评论结构变了（请把这行反馈给我）。";
     } else if (stats.eligible === 0) {
         hint = `→ 评论都短于最小长度 ${stats.minLength}，把「最小检测长度」调小试试。`;
+    } else if (stats.markerMax >= 2) {
+        hint = "→ 已经出现 2 个以上标记特征，本应命中；若没看到标签请把这几行反馈给我。";
+    } else if (stats.markerMax === 1) {
+        hint = "→ 只出现 1 个标记特征（人设/称呼/动作/推广），按设计需要 2 个以上才判定。";
     } else if (stats.peers < 3) {
-        hint = "→ 上下文只有很少几条评论，无法形成跨评论证据；把评论区往下滚、多加载几条再看。";
+        hint = "→ 上下文只有很少几条评论，既没有标记也凑不出跨评论证据；把评论区往下滚多加载几条。";
     } else if (stats.featureMax === 0) {
         hint = "→ 该批评论没有触发任何特征：它们大概率不是同一套模板/AI 文本。";
     } else if (stats.top === 0) {
-        hint = "→ 命中了弱特征，但缺少跨评论证据（评论之间不相似），按设计不会标记。";
+        hint = "→ 命中了弱特征，但既没有 2 个以上标记、也没有跨评论证据，按设计不会标记。";
     } else if (stats.hits === 0) {
         const suggested = Math.max(0.05, Math.floor((stats.top - 0.05) * 20) / 20);
         hint = `→ 有证据但最高只有 ${stats.top.toFixed(2)}，低于阈值 ${stats.threshold}；把阈值调到 ${suggested.toFixed(2)} 左右试试。`;
@@ -861,6 +876,10 @@ function applyAicgCategory(
     if (stats) {
         stats.top = Math.max(stats.top, result.confidence);
         stats.featureMax = Math.max(stats.featureMax, result.features.length);
+        stats.markerMax = Math.max(
+            stats.markerMax,
+            result.features.filter((feature) => AICG_MARKER_FEATURES.has(feature.id)).length,
+        );
     }
     const decision = decideAicgOption(result, option, tuning);
     if (stats && decision.option !== DynamicSponsorOption.Disabled) stats.hits++;

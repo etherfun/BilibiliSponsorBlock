@@ -2861,5 +2861,14 @@
     },
     "aicgFeature_aiPhraseDensity": {
         "message": "書面套話密度"
+    },
+    "aicgFeature_actionNarration": {
+        "message": "括號裡的動作描寫"
+    },
+    "aicgFeature_promoInstruction": {
+        "message": "安裝/推廣指令"
+    },
+    "aicgFeature_ownerAddress": {
+        "message": "稱呼使用者為「主人」"
     }
 }

@@ -25,8 +25,11 @@ import {
     codePointLength,
     emojiCount,
     hasAiBoilerplate,
-    hasPersonaSelfReference,
     jaccard,
+    countOwnerAddress,
+    countPersonaSelfReference,
+    hasActionNarration,
+    hasPromoInstruction,
     looksColloquial,
     looksLikeReportToOwner,
     mean,
@@ -44,13 +47,33 @@ const FEATURE_WEIGHTS: Record<AicgFeatureId, number> = {
     crossCommentSimilarity: 2.0,
     sharedPhraseCoverage: 1.8,
     duplicateFamily: 1.0,
+    // 单条即可成立的「标记」：不依赖评论区里有没有同类评论
+    personaSelfReference: 1.4,
+    ownerAddress: 1.2,
+    actionNarration: 1.3,
+    promoInstruction: 1.1,
     lowInformationDensity: 1.0,
     aiPhraseDensity: 0.6,
-    personaSelfReference: 0.8,
     structuralUniformity: 0.8,
     reportToOwner: 0.6,
     punctuationRegularity: 0.5,
 };
+
+/**
+ * 「单条标记」特征：它们描述的是**内容形态**（扮演人设、称呼主人、舞台指示、
+ * 安装指令），不是「写得好不好」，所以单条评论就能成立。
+ *
+ * 这是本次最重要的修正：真实场景里 AI 评论是**零散夹杂**在正常评论之间的，
+ * 每条独立生成、互不相似，跨评论统计（bigram df、Jaccard、短语跨作者复用）
+ * 永远到不了阈值，还会被正常评论稀释 —— 之前只有成簇证据一条通道，
+ * 结果就是「疑似度恒为 0」。
+ */
+const MARKER_FEATURES = new Set<AicgFeatureId>([
+    "personaSelfReference",
+    "ownerAddress",
+    "actionNarration",
+    "promoInstruction",
+]);
 
 /**
  * 通用书面语/套话套路。刻意只收跨领域的表达，不收任何具体视频的口头禅，
@@ -323,23 +346,46 @@ export class HeuristicAicgDetector implements AicgDetector {
             });
         }
 
-        // ---- 弱证据 7：人设自我指称 ----
-        // 单独的「本鲸」可能只是真人玩梗，所以强度按跨评论证据缩放：
-        // 没有跨评论证据时不产生特征，有证据时才作为辅助加权。
-        const crossEvidence = Math.max(
-            templateStrength, similarityStrength, phraseStrength,
-            familyStrength >= 0.2 ? familyStrength : 0,
-        );
-        if (!tooShort && hasPersonaSelfReference(body) && looksLikeReportToOwner(body, mentioned)
-            && crossEvidence > CROSS_COMMENT_REQUIRED * 0.5) {
+        // ---- 标记证据（单条即可成立，不依赖评论区有没有同类评论）----
+        // 真实场景里 AI 评论零散夹杂在正常评论之间，成簇证据经常完全不存在，
+        // 所以必须有这条独立通道，否则疑似度会恒为 0。
+        const personaCount = countPersonaSelfReference(body);
+        if (!tooShort && personaCount > 0) {
             features.push({
                 id: "personaSelfReference",
-                strength: 0.55 * Math.min(1, crossEvidence / CROSS_COMMENT_REQUIRED),
-                reason: "personaSelfReference",
+                strength: Math.min(1, 0.7 + 0.15 * (personaCount - 1)),
+                reason: `personaSelfReference:${personaCount}`,
             });
         }
 
-        // ---- 弱证据 8：汇报式结构 ----
+        const ownerCount = countOwnerAddress(body);
+        if (!tooShort && ownerCount > 0) {
+            features.push({
+                id: "ownerAddress",
+                strength: Math.min(1, 0.6 + 0.15 * (ownerCount - 1)),
+                reason: `ownerAddress:${ownerCount}`,
+            });
+        }
+
+        if (!tooShort && hasActionNarration(body)) {
+            features.push({
+                id: "actionNarration",
+                strength: 0.8,
+                reason: "actionNarration",
+            });
+        }
+
+        if (!tooShort && hasPromoInstruction(body)) {
+            features.push({
+                id: "promoInstruction",
+                strength: 0.75,
+                reason: "promoInstruction",
+            });
+        }
+
+        // ---- 弱证据 7：汇报式结构 ----
+        // 这是本评论区特有的词汇表（插件/分支/原子锁…），只作为辅助标记，
+        // 单独不构成通道 A 的计数标记（它不在 MARKER_FEATURES 里）。
         if (!tooShort && looksLikeReportToOwner(body, mentioned)) {
             features.push({
                 id: "reportToOwner",
@@ -515,6 +561,19 @@ export class HeuristicAicgDetector implements AicgDetector {
  */
 const NOISE_FLOOR = 0.15;
 
+/**
+ * 通道 A（单条标记）的判定口径：
+ * 至少 MARKER_COUNT_FOR_HIT 个互相独立的标记同时成立才开始计分，
+ * 达到这个数量即 MARKER_BASE，之后每多一个加 MARKER_STEP。
+ *
+ * 之所以要求「两个以上」：单一标记都有合理的真人解释
+ * （跟作者开玩笑叫主人、排版习惯用括号），两个同时命中才基本只剩扮演人设的生成文本。
+ */
+const MARKER_MIN_STRENGTH = 0.5;
+const MARKER_COUNT_FOR_HIT = 2;
+const MARKER_BASE = 0.62;
+const MARKER_STEP = 0.12;
+
 function combine(features: readonly AicgFeatureEvidence[], boost: number): AicgConfidence {
     if (!features.length) return 0;
 
@@ -522,6 +581,7 @@ function combine(features: readonly AicgFeatureEvidence[], boost: number): AicgC
     let denominator = 0;
     let strongestCrossComment = 0;
     let hasDuplicateEvidence = false;
+    let markerCount = 0;
 
     for (const feature of features) {
         if (feature.strength < NOISE_FLOOR) continue;
@@ -538,17 +598,30 @@ function combine(features: readonly AicgFeatureEvidence[], boost: number): AicgC
         if (feature.id === "duplicateFamily" && feature.strength > 0.2) {
             hasDuplicateEvidence = true;
         }
+        if (MARKER_FEATURES.has(feature.id) && feature.strength >= MARKER_MIN_STRENGTH) {
+            markerCount++;
+        }
     }
 
-    if (denominator === 0) return 0;
+    // ---- 通道 A：标记特征（单条即可成立）----
+    // 两个及以上**互相独立**的标记同时出现才算数：只出现「主人」可能是在跟作者开玩笑，
+    // 只出现一个括号动作也可能是排版习惯；两者同时出现基本只能是扮演人设的生成文本。
+    const markerScore = markerCount >= MARKER_COUNT_FOR_HIT
+        ? Math.min(1, MARKER_BASE + MARKER_STEP * (markerCount - MARKER_COUNT_FOR_HIT))
+        : 0;
 
-    const weighted = numerator / denominator;
-    // 跨评论证据不足时，整体疑似程度被压到阈值以下：
-    // 单条「写得工整」的评论本身不构成 AI 证据。
-    const crossCommentCap = hasDuplicateEvidence ? 1 : Math.max(0, strongestCrossComment / CROSS_COMMENT_REQUIRED);
-    const capped = weighted * Math.min(1, crossCommentCap);
+    // ---- 通道 B：成簇证据 ----
+    // 跨评论证据不足时被闸门压到阈值以下：单条「写得工整」不构成 AI 证据。
+    let clusterScore = 0;
+    if (denominator > 0) {
+        const weighted = numerator / denominator;
+        const crossCommentCap = hasDuplicateEvidence
+            ? 1
+            : Math.max(0, strongestCrossComment / CROSS_COMMENT_REQUIRED);
+        clusterScore = weighted * Math.min(1, crossCommentCap) * CONFIDENCE_SCALE;
+    }
 
-    return Math.max(0, Math.min(1, capped * CONFIDENCE_SCALE + boost));
+    return Math.max(0, Math.min(1, Math.max(markerScore, clusterScore) + boost));
 }
 
 function emptyResult(normalizedText: string, textLength: number, tooShort: boolean): AicgDetectionResult {

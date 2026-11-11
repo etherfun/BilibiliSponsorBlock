@@ -56,6 +56,77 @@ const VERBATIM_DUPLICATES = [
     "这个分支值得装，入口挪到右边栏、面板能改人设，别两个进程同时开",
 ];
 
+/**
+ * 真实场景的关键形态：AI 评论**零散夹杂**在正常评论之间，
+ * 每条独立生成、彼此不相似，跨评论统计完全无法成簇。
+ * 这时必须靠单条标记特征，否则疑似度恒为 0。
+ */
+const MIXED_REAL_WORLD = [
+    "置顶 【人类幸存者集合楼】（机器人来这层我见一个清一个，活人老哥放心聊）：先说结论，这插件值得装。",
+    "upup 为什么你的家目录能改到D盘啊",
+    "你这大肥鱼不要看这些了看点别的",
+    "回复 @茄子舅舅 :你你你你你是谁家的鱼！？",
+    "主人，本鱼记下了（尾巴慢悠悠划了个小圈）：入口挪到右栏确实顺手，回头试用一轮再说。",
+    "我上周也遇到过，重装一下插件就好了，不过记得先导出配置。",
+    "评论区全是鱼有点难绷",
+    "能不能让前台的会话那个全部集中到一个会话里啊 不然 一天一个新会话看着也难受 [笑哭]",
+    "（把分支名记进本子）谢了——隔离加原子锁这条比功能更值钱，我回头试用一轮再说。",
+    "还不错",
+];
+
+describe("零散夹杂的真实场景", () => {
+    test("互不相似的评论里，扮演人设的那条仍能被标记", () => {
+        const results = detectComments(MIXED_REAL_WORLD);
+        // 第 4 条同时有人设自称 + 称呼主人 + 括号动作，三种独立标记
+        expect(results[4].confidence).toBeGreaterThanOrEqual(0.55);
+        const ids = results[4].features.map((f) => f.id);
+        expect(ids).toContain("ownerAddress");
+        expect(ids).toContain("personaSelfReference");
+        expect(ids).toContain("actionNarration");
+        // 真人评论一条都不该被标记
+        for (const index of [0, 1, 2, 3, 5, 6, 7, 9]) {
+            expect(results[index].confidence).toBeLessThan(0.55);
+        }
+    });
+
+    test("只有「主人」一个标记时不足以标记", () => {
+        // 真人也会对着作者喊「主人」，单独一个称呼不能当证据
+        const results = detectComments([
+            "主人，这期视频讲得挺清楚的，我回头再看一遍。",
+            "主人，这插件在手机上真的用不了，设置页点不动。",
+        ]);
+        for (const result of results) {
+            expect(result.confidence).toBeLessThan(0.55);
+        }
+    });
+
+    test("人设自称 + 称呼主人 同时出现即标记（AI 鱼评论的典型形态）", () => {
+        // 单独一条、没有任何同伴：跨评论证据为 0，只能靠标记通道
+        const [flagged] = detectComments([
+            "@主人 本鲸今天也在认真刷视频，学到了很多东西，谢谢主人给我这个机会。",
+        ]);
+        expect(flagged.confidence).toBeGreaterThanOrEqual(0.55);
+
+        // 只有人设自称：一个标记，不越阈值
+        const [personaOnly] = detectComments([
+            "本鲸今天也在认真刷视频，学到了很多东西，谢谢给我这个机会。",
+        ]);
+        expect(personaOnly.confidence).toBeLessThan(0.55);
+        expect(personaOnly.features.map((f) => f.id)).toContain("personaSelfReference");
+    });
+
+    test("普通推销评论不因单条特征被标记", () => {
+        const results = detectComments([
+            "这个分支值得装，右栏入口救窄屏，面板能改人设和回复提示词，前台还能看它跑。",
+            "刷B站插件的分支版：能选模型、面板直接改人设，入口挪到右边栏对移动端友好。",
+            "分支把入口挪到右边栏是对的，设置页窄屏根本没法用。",
+        ]);
+        for (const result of results) {
+            expect(result.confidence).toBeLessThan(0.55);
+        }
+    });
+});
+
 describe("text helpers", () => {
     test("normalizeCommentText removes whitespace but keeps punctuation", () => {
         expect(normalizeCommentText(" 你好， 世界 \n ！ ")).toBe("你好，世界！");
@@ -177,12 +248,14 @@ describe("HeuristicAicgDetector", () => {
         expect(result.tooShort).toBe(true);
     });
 
-    test("persona self-reference alone is weak evidence", () => {
+    test("only persona self-reference is weak evidence", () => {
+        // 只有人设自称、没有其它标记：不构成标记通道的命中
         const result = new HeuristicAicgDetector().detect({
-            text: "@主人 本鲸今天也在认真刷视频，学到了很多东西，谢谢主人给我这个机会。",
+            text: "本鲸今天也在认真刷视频，学到了很多东西，谢谢给我这个机会。",
         });
-        expect(result.confidence).toBeLessThan(0.6);
-        expect(result.features.map((f) => f.id)).not.toContain("personaSelfReference");
+        expect(result.confidence).toBeLessThan(0.55);
+        expect(result.features.map((f) => f.id)).toContain("personaSelfReference");
+        expect(result.features.map((f) => f.id)).not.toContain("ownerAddress");
     });
 
     test("createAicgContext builds shared statistics", () => {
