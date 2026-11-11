@@ -26,6 +26,11 @@ export interface ToggleOption {
     dontDisable?: boolean;
 }
 
+/** 类别行下方挂载的附加设置：布尔开关或数字输入。 */
+export type ExtraOption =
+    | { type: "toggle"; configKey: string; label: string }
+    | { type: "number"; configKey: string; label: string; step: number; min: number; max: number };
+
 class CategorySkipOptionsComponent extends React.Component<CategorySkipOptionsProps, CategorySkipOptionsState> {
     setBarColorTimeout: NodeJS.Timeout;
 
@@ -256,6 +261,9 @@ class DynamicSponsorHideOptionsComponent extends React.Component<CategorySkipOpt
                     case DynamicSponsorOption.Hide:
                         defaultOption = "Hide_DynamicSponsor";
                         break;
+                    case DynamicSponsorOption.HideCard:
+                        defaultOption = "HideCard_DynamicSponsor";
+                        break;
                 }
 
                 break;
@@ -301,8 +309,82 @@ class DynamicSponsorHideOptionsComponent extends React.Component<CategorySkipOpt
                         {chrome.i18n.getMessage("category_" + this.props.category + "_description")}
                     </td>
                 </tr>
+
+                {this.getExtraOptionComponents(this.props.category)}
             </>
         );
+    }
+
+    /**
+     * 类别行下方挂载的附加设置。
+     * 与 `CategorySkipOptionsComponent.getExtraOptionComponents` 同构：
+     * 「疑似 AICG 内容」的阈值/最小长度/调试开关直接长在它自己的类别行下面，
+     * 不另起一块独立设置。
+     */
+    getExtraOptionComponents(category: string): JSX.Element[] {
+        const result: JSX.Element[] = [];
+        for (const option of this.getExtraOptions(category)) {
+            result.push(
+                <tr key={option.configKey}>
+                    <td id={`${category}_${option.configKey}`} className="categoryExtraOptions" colSpan={3}>
+                        {option.type === "number" ? (
+                            <label className="number-container">
+                                <span className="optionLabel">{option.label}</span>
+                                <input
+                                    type="number"
+                                    step={option.step}
+                                    min={option.min}
+                                    max={option.max}
+                                    defaultValue={Config.config[option.configKey]}
+                                    onChange={(event) => {
+                                        Config.config[option.configKey] = event.target.value;
+                                    }}
+                                />
+                            </label>
+                        ) : (
+                            <ToggleOptionComponent
+                                configKey={option.configKey}
+                                label={option.label}
+                                style={{ width: "inherit" }}
+                            />
+                        )}
+                    </td>
+                </tr>
+            );
+        }
+
+        return result;
+    }
+
+    getExtraOptions(category: string): ExtraOption[] {
+        switch (category) {
+            case "dynamicSponsor_aicg":
+                return [
+                    {
+                        type: "number",
+                        configKey: "commentAicgThreshold",
+                        label: chrome.i18n.getMessage("commentAicgThresholdShort"),
+                        step: 0.05,
+                        min: 0,
+                        max: 1,
+                    },
+                    {
+                        type: "number",
+                        configKey: "commentAicgMinLength",
+                        label: chrome.i18n.getMessage("commentAicgMinLengthShort"),
+                        step: 1,
+                        min: 0,
+                        max: 200,
+                    },
+                    {
+                        type: "toggle",
+                        configKey: "commentAicgDebug",
+                        label: chrome.i18n.getMessage("commentAicgDebug"),
+                    },
+                ];
+            default:
+                return [];
+        }
     }
 
     skipOptionSelected(event: React.ChangeEvent<HTMLSelectElement>): void {
@@ -320,6 +402,10 @@ class DynamicSponsorHideOptionsComponent extends React.Component<CategorySkipOpt
                 break;
             case "Hide_DynamicSponsor":
                 option = DynamicSponsorOption.Hide;
+
+                break;
+            case "HideCard_DynamicSponsor":
+                option = DynamicSponsorOption.HideCard;
 
                 break;
         }
@@ -342,7 +428,10 @@ class DynamicSponsorHideOptionsComponent extends React.Component<CategorySkipOpt
     getCategorySkipOptions(): JSX.Element[] {
         const elements: JSX.Element[] = [];
 
-        const optionNames = ["disable", "showOverlay_DynamicSponsor", "Hide_DynamicSponsor"];
+        // 「疑似 AICG 内容」多一个「隐藏卡片」：整条评论直接不显示。
+        const optionNames = this.props.category === "dynamicSponsor_aicg"
+            ? ["disable", "showOverlay_DynamicSponsor", "Hide_DynamicSponsor", "HideCard_DynamicSponsor"]
+            : ["disable", "showOverlay_DynamicSponsor", "Hide_DynamicSponsor"];
 
         for (const optionName of optionNames) {
             elements.push(

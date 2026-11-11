@@ -81,20 +81,34 @@ async function appendComments(page: Page, texts: string[]): Promise<void> {
     }, texts);
 }
 
+/** 运行中切换 AICG 处理方式：类别表是数组，需要整块写回。 */
+async function setAicgOption(worker: Worker, option: number): Promise<void> {
+    await writeSyncStorage(worker, {
+        dynamicSponsorSelections: [
+            { name: "dynamicSponsor_sponsor", option: 0 },
+            { name: "dynamicSponsor_aicg", option },
+        ],
+    });
+}
+
 async function openVideoWithAicg(
     page: Page,
     serviceWorker: Worker,
     sendContentMessage: (message: unknown) => Promise<unknown>,
     settings: Record<string, unknown>
 ): Promise<void> {
+    const { aicgOption = 0, ...rest } = settings;
     await writeSyncStorage(serviceWorker, {
         dynamicAndCommentSponsorBlocker: true,
         commentSponsorBlock: true,
         dynamicSponsorBlock: false,
         commentSponsorReplyBlock: false,
         // 关闭商品链接过滤，隔离本功能的观察结果
-        dynamicSponsorSelections: [{ name: "dynamicSponsor_sponsor", option: 0 }],
-        ...settings,
+        dynamicSponsorSelections: [
+            { name: "dynamicSponsor_sponsor", option: 0 },
+            { name: "dynamicSponsor_aicg", option: aicgOption },
+        ],
+        ...rest,
     });
     await routeMockBilibiliVideoPage(page, { currentTime: 0, paused: true });
     await page.goto(`https://www.bilibili.com/video/${defaultMockBvid}/`);
@@ -103,39 +117,38 @@ async function openVideoWithAicg(
 }
 
 test("禁用时不添加任何标签，也不改动评论", async ({ extensionContext, extensionPage: page, extensionServiceWorker, sendContentMessage }) => {
-    await openVideoWithAicg(page, extensionServiceWorker, sendContentMessage, { commentAicgAction: 0 });
+    await openVideoWithAicg(page, extensionServiceWorker, sendContentMessage, { aicgOption: 0 });
     await mountComments(page, [...TEMPLATE_PEERS, TEMPLATE_PEERS[0]]);
     await page.waitForTimeout(1200);
 
-    await expect(page.locator("bili-comments #aicgSuspectLabel")).toHaveCount(0);
+    await expect(page.locator("bili-comments #commentAicgLabel")).toHaveCount(0);
     await expect(page.locator("bili-comments #content").first()).toBeVisible();
 });
 
 test("仅添加标签：评论保持可见并带一个标签", async ({ extensionPage: page, extensionServiceWorker, sendContentMessage }) => {
     await openVideoWithAicg(page, extensionServiceWorker, sendContentMessage, {
-        commentAicgAction: 1,
+        aicgOption: 1,
         commentAicgMinLength: 12,
     });
     await mountComments(page, [...TEMPLATE_PEERS, TEMPLATE_PEERS[0]]);
     await page.waitForTimeout(1200);
 
-    expect(await page.locator("bili-comments #aicgSuspectLabel").count()).toBeGreaterThan(0);
-    const label = page.locator("bili-comments #aicgSuspectLabel").first();
-    await expect(label).toContainText("疑似 AI");
-    // 标签必须真的看得见：没有图标，光靠内边距会渲染成一条看不见的细线。
+    expect(await page.locator("bili-comments #commentAicgLabel").count()).toBeGreaterThan(0);
+    const label = page.locator("bili-comments #commentAicgLabel").first();
+    // 文案用的是类别名，与商品链接类别同一个 labelSponsorStyle 组件
+    expect(await label.textContent()).toContain("疑似 AICG 内容");
+    // 标签必须真的看得见：它靠 SVG 图标撑起来，不能塌成一条细线
     const box = await label.boundingBox();
     expect(box).not.toBeNull();
-    expect(box.width).toBeGreaterThan(40);
+    expect(box.width).toBeGreaterThan(16);
     expect(box.height).toBeGreaterThan(12);
-    // 标签文字默认可见（不依赖 hover）
-    await expect(label.locator(".Label")).toBeVisible();
     // 评论正文仍然可见
     await expect(page.locator("bili-comments #content").first()).toBeVisible();
 });
 
 test("隐藏内容：只隐藏正文，容器与交互仍在，可一键恢复", async ({ extensionPage: page, extensionServiceWorker, sendContentMessage }) => {
     await openVideoWithAicg(page, extensionServiceWorker, sendContentMessage, {
-        commentAicgAction: 2,
+        aicgOption: 2,
         commentAicgMinLength: 12,
     });
     await mountComments(page, [...TEMPLATE_PEERS, TEMPLATE_PEERS[0]]);
@@ -155,7 +168,7 @@ test("隐藏内容：只隐藏正文，容器与交互仍在，可一键恢复",
 
 test("隐藏卡片：整条评论不显示", async ({ extensionPage: page, extensionServiceWorker, sendContentMessage }) => {
     await openVideoWithAicg(page, extensionServiceWorker, sendContentMessage, {
-        commentAicgAction: 3,
+        aicgOption: 3,
         commentAicgMinLength: 12,
     });
     await mountComments(page, [...TEMPLATE_PEERS, TEMPLATE_PEERS[0]]);
@@ -166,16 +179,16 @@ test("隐藏卡片：整条评论不显示", async ({ extensionPage: page, exten
 
 test("动态加载的新评论同样被处理，且不会重复插入标签", async ({ extensionPage: page, extensionServiceWorker, sendContentMessage }) => {
     await openVideoWithAicg(page, extensionServiceWorker, sendContentMessage, {
-        commentAicgAction: 1,
+        aicgOption: 1,
         commentAicgMinLength: 12,
     });
     await mountComments(page, TEMPLATE_PEERS);
     await page.waitForTimeout(1000);
-    const before = await page.locator("bili-comments #aicgSuspectLabel").count();
+    const before = await page.locator("bili-comments #commentAicgLabel").count();
 
     await appendComments(page, [TEMPLATE_PEERS[0]]);
     await page.waitForTimeout(1200);
-    const after = await page.locator("bili-comments #aicgSuspectLabel").count();
+    const after = await page.locator("bili-comments #commentAicgLabel").count();
     expect(after).toBeGreaterThan(before);
 
     // 再触发一轮扫描，标签数量不应继续增长
@@ -184,12 +197,12 @@ test("动态加载的新评论同样被处理，且不会重复插入标签", as
         root.querySelector("#feed").appendChild(document.createElement("div"));
     });
     await page.waitForTimeout(1200);
-    expect(await page.locator("bili-comments #aicgSuspectLabel").count()).toBe(after);
+    expect(await page.locator("bili-comments #commentAicgLabel").count()).toBe(after);
 });
 
 test("子评论（回复）也会被处理", async ({ extensionPage: page, extensionServiceWorker, sendContentMessage }) => {
     await openVideoWithAicg(page, extensionServiceWorker, sendContentMessage, {
-        commentAicgAction: 1,
+        aicgOption: 1,
         commentAicgMinLength: 12,
     });
     await mountComments(page, TEMPLATE_PEERS);
@@ -210,16 +223,16 @@ test("子评论（回复）也会被处理", async ({ extensionPage: page, exten
     });
     await page.waitForTimeout(1500);
 
-    await expect(page.locator("bili-comments bili-comment-reply-renderer #aicgSuspectLabel")).toHaveCount(1);
+    await expect(page.locator("bili-comments bili-comment-reply-renderer #commentAicgLabel")).toHaveCount(1);
 });
 
 test("修改设置后立即生效：从禁用切到隐藏卡片", async ({ extensionPage: page, extensionServiceWorker, sendContentMessage }) => {
-    await openVideoWithAicg(page, extensionServiceWorker, sendContentMessage, { commentAicgAction: 0 });
+    await openVideoWithAicg(page, extensionServiceWorker, sendContentMessage, { aicgOption: 0 });
     await mountComments(page, [...TEMPLATE_PEERS, TEMPLATE_PEERS[0]]);
     await page.waitForTimeout(1200);
-    await expect(page.locator("bili-comments #aicgSuspectLabel")).toHaveCount(0);
+    await expect(page.locator("bili-comments #commentAicgLabel")).toHaveCount(0);
 
-    await writeSyncStorage(extensionServiceWorker, { commentAicgAction: 3 });
+    await setAicgOption(extensionServiceWorker, 3);
     // 触发一次扫描（真实页面里由滚动/新评论触发）
     await appendComments(page, []);
     await page.evaluate(() => {
@@ -233,16 +246,16 @@ test("修改设置后立即生效：从禁用切到隐藏卡片", async ({ exten
 
 test("修改设置后立即生效：在两种已启用模式之间切换", async ({ extensionPage: page, extensionServiceWorker, sendContentMessage }) => {
     await openVideoWithAicg(page, extensionServiceWorker, sendContentMessage, {
-        commentAicgAction: 1,
+        aicgOption: 1,
         commentAicgMinLength: 12,
     });
     await mountComments(page, [...TEMPLATE_PEERS, TEMPLATE_PEERS[0]]);
     await page.waitForTimeout(1200);
-    await expect(page.locator("bili-comments #aicgSuspectLabel").first()).toBeVisible();
+    await expect(page.locator("bili-comments #commentAicgLabel").first()).toBeVisible();
     await expect(page.locator("bili-comments #content").first()).toBeVisible();
 
     // 仅添加标签 -> 隐藏内容：已渲染的评论要立刻跟着变
-    await writeSyncStorage(extensionServiceWorker, { commentAicgAction: 2 });
+    await setAicgOption(extensionServiceWorker, 2);
     await page.evaluate(() => {
         document.querySelector("bili-comments").shadowRoot.querySelector("#feed").appendChild(document.createElement("div"));
     });
@@ -251,7 +264,7 @@ test("修改设置后立即生效：在两种已启用模式之间切换", async
     await expect(page.locator("bili-comments #showAicgContent").first()).toBeVisible();
 
     // 隐藏内容 -> 隐藏卡片
-    await writeSyncStorage(extensionServiceWorker, { commentAicgAction: 3 });
+    await setAicgOption(extensionServiceWorker, 3);
     await page.evaluate(() => {
         document.querySelector("bili-comments").shadowRoot.querySelector("#feed").appendChild(document.createElement("div"));
     });
@@ -261,14 +274,14 @@ test("修改设置后立即生效：在两种已启用模式之间切换", async
 
 test("人工撰写的规范评论不会被误伤", async ({ extensionPage: page, extensionServiceWorker, sendContentMessage }) => {
     await openVideoWithAicg(page, extensionServiceWorker, sendContentMessage, {
-        commentAicgAction: 3,
+        aicgOption: 3,
         commentAicgMinLength: 12,
     });
     await mountComments(page, [HUMAN_COMMENT]);
     await page.waitForTimeout(1200);
 
     await expect(page.locator("bili-comments bili-comment-renderer").first()).toBeVisible();
-    await expect(page.locator("bili-comments #aicgSuspectLabel")).toHaveCount(0);
+    await expect(page.locator("bili-comments #commentAicgLabel")).toHaveCount(0);
 });
 
 test("商品链接过滤不受影响，可与 AICG 过滤同时工作", async ({ extensionContext, extensionPage: page, extensionServiceWorker, sendContentMessage }) => {
@@ -277,8 +290,11 @@ test("商品链接过滤不受影响，可与 AICG 过滤同时工作", async ({
         commentSponsorBlock: true,
         dynamicSponsorBlock: false,
         commentSponsorReplyBlock: false,
-        dynamicSponsorSelections: [{ name: "dynamicSponsor_sponsor", option: 2 }],
-        commentAicgAction: 1,
+        // 两个类别同时启用：商品链接隐藏内容，AICG 仅加标签
+        dynamicSponsorSelections: [
+            { name: "dynamicSponsor_sponsor", option: 2 },
+            { name: "dynamicSponsor_aicg", option: 1 },
+        ],
         commentAicgMinLength: 12,
     });
     await routeMockBilibiliVideoPage(page, { currentTime: 0, paused: true });
@@ -293,7 +309,7 @@ test("商品链接过滤不受影响，可与 AICG 过滤同时工作", async ({
     // 原有商品链接过滤仍然生效
     await expect(page.locator("bili-comments #commentSponsorLabel")).toHaveCount(1);
     // AICG 标签也在
-    expect(await page.locator("bili-comments #aicgSuspectLabel").count()).toBeGreaterThan(0);
+    expect(await page.locator("bili-comments #commentAicgLabel").count()).toBeGreaterThan(0);
 });
 
 /** 视觉存档：把三种处理效果截下来，方便人工复核。 */
@@ -302,7 +318,7 @@ test("截图存档：标签、隐藏内容、隐藏卡片三种效果", async ({
     fs.mkdirSync(artifactDir, { recursive: true });
 
     await openVideoWithAicg(page, extensionServiceWorker, sendContentMessage, {
-        commentAicgAction: 1,
+        aicgOption: 1,
         commentAicgMinLength: 12,
         commentAicgDebug: true,
     });
@@ -321,14 +337,14 @@ test("截图存档：标签、隐藏内容、隐藏卡片三种效果", async ({
     await mountComments(page, [...TEMPLATE_PEERS.slice(0, 3), TEMPLATE_PEERS[0], HUMAN_COMMENT]);
     await stamp("comments-label-mode");
 
-    await writeSyncStorage(extensionServiceWorker, { commentAicgAction: 2 });
+    await setAicgOption(extensionServiceWorker, 2);
     await appendComments(page, []);
     await page.evaluate(() => {
         document.querySelector("bili-comments").shadowRoot.querySelector("#feed").appendChild(document.createElement("div"));
     });
     await stamp("comments-hide-content-mode");
 
-    await writeSyncStorage(extensionServiceWorker, { commentAicgAction: 3 });
+    await setAicgOption(extensionServiceWorker, 3);
     await page.evaluate(() => {
         document.querySelector("bili-comments").shadowRoot.querySelector("#feed").appendChild(document.createElement("div"));
     });

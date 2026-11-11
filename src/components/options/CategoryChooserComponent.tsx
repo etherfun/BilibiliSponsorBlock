@@ -98,7 +98,12 @@ class DynamicSponsorChooserComponent extends React.Component<CategoryChooserProp
 
     getCategorySkipOptions(): JSX.Element[] {
         const elements: JSX.Element[] = [];
-        const list = ["dynamicSponsor_sponsor", "dynamicSponsor_forward_sponsor", "dynamicSponsor_suspicion_sponsor"]
+        const list = [
+            "dynamicSponsor_sponsor",
+            "dynamicSponsor_forward_sponsor",
+            "dynamicSponsor_suspicion_sponsor",
+            "dynamicSponsor_aicg",
+        ]
 
         for (const category of list) {
             elements.push(

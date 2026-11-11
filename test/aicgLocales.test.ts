@@ -2,10 +2,10 @@ import { readFileSync } from "fs";
 import { join } from "path";
 
 /**
- * 新增设置的文案完整性测试。
+ * 「疑似 AICG 内容」相关文案的完整性测试。
  *
- * 设置页用 `__MSG_key__` 占位，缺失文案会在界面上直接显示成占位符本身。
- * 这里同时校验：新选项用到的每个 key 都在三种语言中存在，且没有漏译。
+ * 这个功能现在完全长在「隐藏 动态主页/评论区 的商品链接」类别表里，
+ * 所以除了自己那几条文案，还要保证类别名、选项名、特征名在三种语言里都存在。
  */
 
 const ROOT = join(__dirname, "..");
@@ -15,75 +15,91 @@ function readMessages(locale: (typeof LOCALES)[number]): Record<string, { messag
     return JSON.parse(readFileSync(join(ROOT, "public", "_locales", locale, "messages.json"), "utf8"));
 }
 
-/** 新功能在设置页与代码里用到的文案 key。 */
+/** 类别行、选项、微调项、标签、调试特征用到的文案 key。 */
 const AICG_KEYS = [
-    "commentAicg",
-    "commentAicgDescription",
-    "commentAicgAction",
-    "commentAicgActionDescription",
-    "commentAicgActionDisabled",
-    "commentAicgActionLabel",
-    "commentAicgActionHideContent",
-    "commentAicgActionHideCard",
-    "commentAicgThreshold",
-    "commentAicgThresholdDescription",
-    "commentAicgMinLength",
-    "commentAicgMinLengthDescription",
+    // 类别行（React 类别表）
+    "category_dynamicSponsor_aicg",
+    "category_dynamicSponsor_aicg_description",
+    // 选项
+    "showOverlay_DynamicSponsor",
+    "Hide_DynamicSponsor",
+    "HideCard_DynamicSponsor",
+    // 挂在该类别行下面的微调项
+    "commentAicgThresholdShort",
+    "commentAicgMinLengthShort",
     "commentAicgDebug",
     "commentAicgDebugDescription",
-    "aicgSuspectLabel",
+    // 评论上的按钮
     "aicgShowContent",
     "aicgHideContent",
+    // 调试标签里显示的特征名
     "aicgFeature_templateReuse",
     "aicgFeature_crossCommentSimilarity",
+    "aicgFeature_sharedPhraseCoverage",
     "aicgFeature_duplicateFamily",
     "aicgFeature_lowInformationDensity",
+    "aicgFeature_aiPhraseDensity",
     "aicgFeature_personaSelfReference",
     "aicgFeature_reportToOwner",
     "aicgFeature_structuralUniformity",
     "aicgFeature_punctuationRegularity",
-    "category_commentAicg",
-    "category_commentAicg_description",
 ];
 
 describe("疑似 AICG 文案", () => {
-    test.each(LOCALES)("%s 包含全部新文案且非空", (locale) => {
+    test.each(LOCALES)("%s 包含全部相关文案且非空", (locale) => {
         const messages = readMessages(locale);
-        const missing = AICG_KEYS.filter((key) => !messages[key]);
-        expect(missing).toEqual([]);
-        const empty = AICG_KEYS.filter((key) => !messages[key].message?.trim());
-        expect(empty).toEqual([]);
+        expect(AICG_KEYS.filter((key) => !messages[key])).toEqual([]);
+        expect(AICG_KEYS.filter((key) => !messages[key].message?.trim())).toEqual([]);
     });
 
-    test("设置页里的 __MSG_ 占位符都能在每种语言中解析", () => {
-        const html = readFileSync(join(ROOT, "public", "options", "options.html"), "utf8");
-        const keys = [...html.matchAll(/__MSG_([A-Za-z0-9_]+)__/g)].map((match) => match[1]);
-        const unique = [...new Set(keys)];
-
-        // 设置页里实际出现的新功能占位符：一个都不能少。
-        const expectedInPage = AICG_KEYS.filter((key) => key.startsWith("commentAicg"));
-        expect(unique).toEqual(expect.arrayContaining(expectedInPage));
-
-        // 只对本功能引入的占位符断言可解析；danmaku* 等是本次改动之前就缺失的文案。
-        for (const locale of LOCALES) {
-            const messages = readMessages(locale);
-            const missing = expectedInPage.filter((key) => !messages[key]);
-            expect({ locale, missing }).toEqual({ locale, missing: [] });
-        }
-    });
-
-    test("英文文案不是中文占位残留", () => {
+    test("本次新增的英文文案不是中文占位残留", () => {
+        // showOverlay_DynamicSponsor 等选项名是项目原有的 key，英文文件里本来就是中文，
+        // 不属于本次改动，所以只检查这次新增的文案。
+        const addedKeys = AICG_KEYS.filter((key) => ![
+            "showOverlay_DynamicSponsor",
+            "Hide_DynamicSponsor",
+        ].includes(key));
         const messages = readMessages("en");
-        for (const key of AICG_KEYS) {
+        for (const key of addedKeys) {
             expect({ key, hasCjk: /[\u4e00-\u9fff]/.test(messages[key].message) }).toEqual({ key, hasCjk: false });
         }
     });
 
     test("简体与英文的文案 key 集合一致", () => {
-        // zh_TW 历史上少三条 rules_* 文案，与本次改动无关，所以这里只比对 zh_CN 与 en。
+        // zh_TW 历史上少三条 rules_* 文案，与本次改动无关，所以只比对 zh_CN 与 en。
         const zh = new Set(Object.keys(readMessages("zh_CN")));
         const en = new Set(Object.keys(readMessages("en")));
         expect([...zh].filter((key) => !en.has(key))).toEqual([]);
         expect([...en].filter((key) => !zh.has(key))).toEqual([]);
+    });
+
+    test("不再保留已经废弃的独立设置文案", () => {
+        // 处理方式已经并入类别表，这些 key 不应再出现在任何语言里。
+        const obsolete = [
+            "commentAicgAction",
+            "commentAicgActionDisabled",
+            "commentAicgActionLabel",
+            "commentAicgActionHideContent",
+            "commentAicgActionHideCard",
+            "category_commentAicg",
+            "category_commentAicg_description",
+        ];
+        for (const locale of LOCALES) {
+            const messages = readMessages(locale);
+            expect({ locale, obsolete: obsolete.filter((key) => messages[key]) }).toEqual({ locale, obsolete: [] });
+        }
+    });
+
+    test("类别表里每个 dynamicSponsor 类别都有名称与说明文案", () => {
+        const messages = readMessages("zh_CN");
+        for (const category of [
+            "dynamicSponsor_sponsor",
+            "dynamicSponsor_forward_sponsor",
+            "dynamicSponsor_suspicion_sponsor",
+            "dynamicSponsor_aicg",
+        ]) {
+            expect(messages[`category_${category}`]).toBeDefined();
+            expect(messages[`category_${category}_description`]).toBeDefined();
+        }
     });
 });

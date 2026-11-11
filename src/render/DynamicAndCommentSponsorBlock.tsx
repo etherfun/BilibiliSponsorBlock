@@ -6,8 +6,11 @@ import { addCleanupListener } from "../utils/cleanup";
 import { insertSBIconDefinition } from "../thumbnail-utils/thumbnails";
 import { matchSponsorRules } from "../utils/sponsorRegex";
 import { getEffectiveSponsorRegexRules } from "../config/sponsorRegexOTA";
-import { AicgAction } from "../content/aicg/types";
-import { collectCommentNodes, processComments, restoreComments } from "../content/aicg/commentProcessor";
+import { AICG_CATEGORY, getAicgOption, getAicgTuning, shouldProcessComments } from "../content/aicg/settings";
+import { createAicgContext, HeuristicAicgDetector } from "../content/aicg/detector";
+import { decideAicgOption, summarizeFeatures } from "../content/aicg/decision";
+import { readCommentAuthor, readCommentText } from "../content/aicg/commentText";
+import { codePointLength, normalizeCommentText, stripMentionPrefix } from "../content/aicg/text";
 
 export { DynamicListener, CommentListener };
 
@@ -122,7 +125,7 @@ function CommentListener() {
                 observers.delete(root);
             }
         }
-        if (document.hidden || !Config.config.dynamicAndCommentSponsorBlocker || !Config.config.commentSponsorBlock) return;
+        if (document.hidden || !shouldProcessComments()) return;
 
         const observeComments = (host: HTMLElement) => {
             const shadow = host.shadowRoot;
@@ -151,7 +154,6 @@ function CommentListener() {
             if (!root.shadowRoot) continue;
             observeComments(root);
             SponsorComment(root);
-            detectAicgComments(root);
         }
     };
 
@@ -191,7 +193,16 @@ function getCategorySelection(category: string): DynamicSponsorSelection {
     return { name: category, option: DynamicSponsorOption.Disabled } as DynamicSponsorSelection;
 }
 
-function hideSponsorContent(content: HTMLElement, button: HTMLElement, inShadeRoot?: boolean) {
+function hideSponsorContent(
+    content: HTMLElement,
+    button: HTMLElement,
+    inShadeRoot?: boolean,
+    options: { toggleId?: string; showText?: string; hideText?: string } = {},
+) {
+    const toggleId = options.toggleId ?? 'showDynamicSponsor';
+    const showText = options.showText ?? 'dynamicSponsorShow';
+    const hideText = options.hideText ?? 'dynamicSponsorHide';
+
     if (inShadeRoot) {
         shadowRootStyle(button);
         insertSBIconDefinition(button);
@@ -199,8 +210,8 @@ function hideSponsorContent(content: HTMLElement, button: HTMLElement, inShadeRo
 
     content.style.display = 'none';
 
-    const toggleButton = getButton();
-    toggleButton.textContent = chrome.i18n.getMessage('dynamicSponsorShow');
+    const toggleButton = getButton(toggleId);
+    toggleButton.textContent = chrome.i18n.getMessage(showText);
     toggleButton.insertBefore(getIcon(), toggleButton.firstChild);
     toggleButton.addEventListener('click', () => {
         const isHidden = content.style.display === 'none' || !content.style.height === null;
@@ -231,11 +242,18 @@ function hideSponsorContent(content: HTMLElement, button: HTMLElement, inShadeRo
             }
         }, { once: true });
 
-        toggleButton.textContent = chrome.i18n.getMessage(isHidden ? 'dynamicSponsorHide' : 'dynamicSponsorShow');
+        toggleButton.textContent = chrome.i18n.getMessage(isHidden ? hideText : showText);
         toggleButton.insertBefore(getIcon(), toggleButton.firstChild);
     });
 
     button.parentNode!.insertBefore(toggleButton, button.nextSibling);
+}
+
+function getButton(toggleId = 'showDynamicSponsor') {
+    const toggleButton = document.createElement('button');
+    toggleButton.id = toggleId;
+    toggleButton.className = 'bili-dyn-action';
+    return toggleButton;
 }
 
 function labelSponsorStyle(labelName: string, element: HTMLElement, category: string, debugMode: boolean = false, SponsorMatch?:string[], inShadeRoot?: boolean) {
@@ -404,99 +422,284 @@ function getIcon() {
     return svg;
 }
 
-function getButton() {
-    const toggleButton = document.createElement('button');
-    toggleButton.id = 'showDynamicSponsor';
-    toggleButton.className = 'bili-dyn-action';
-    return toggleButton;
-}
-
-/**
- * 疑似 AICG 内容检测。
- *
- * 与商品链接过滤共用同一套「多层 ShadowRoot 发现 + MutationObserver 扫描」机制，
- * 不新增全局观察器；检测层与执行层分别由 content/aicg 下的模块负责。
- */
-function detectAicgComments(root: HTMLElement) {
-    const action = Config.config.commentAicgAction as unknown as AicgAction | undefined | null;
-    if (action === undefined || action === null || action === AicgAction.Disabled) {
-        // 设置被改为禁用时回滚本功能之前的处理结果。
-        restoreComments(collectCommentNodes(root));
-        return;
-    }
-
-    const nodes = collectCommentNodes(root);
-    if (!nodes.length) return;
-
-    const config = {
-        action: action,
-        // 设置页的 number 输入写回的是字符串，这里统一转成数字再参与比较。
-        threshold: Number(Config.config.commentAicgThreshold),
-        minLength: Number(Config.config.commentAicgMinLength),
-        debug: Boolean(Config.config.commentAicgDebug),
-    };
-
-    processComments(nodes, {
-        config,
-        debug: config.debug,
-        labels: {
-            suspect: chrome.i18n.getMessage("aicgSuspectLabel"),
-            show: chrome.i18n.getMessage("aicgShowContent"),
-            hide: chrome.i18n.getMessage("aicgHideContent"),
-        },
-    });
-}
-
 const expandedReplyThreads = new WeakSet<HTMLElement>();
 const wiredReplyButtons = new WeakSet<HTMLButtonElement>();
 
+/** 同一条评论上一次被应用的状态，用于去重，也用于「设置改了要重新套用」。 */
+interface CommentAppliedState {
+    option: DynamicSponsorOption;
+    text: string;
+}
+
+/** 每个类别在 DOM 上留下的标记，回滚时据此认定「这是我干的」。 */
+const GOODS_HIDDEN_ATTR = "data-dynamic-sponsor-hidden";
+const AICG_CONTENT_HIDDEN_ATTR = "data-aicg-content-hidden";
+const AICG_CARD_HIDDEN_ATTR = "data-aicg-card-hidden";
+
+/** 键是评论卡片节点，值是上次应用的类别与文本。 */
+const appliedComments = new WeakMap<HTMLElement, Map<string, CommentAppliedState>>();
+
+function getApplied(card: HTMLElement, category: string): CommentAppliedState | undefined {
+    return appliedComments.get(card)?.get(category);
+}
+
+function setApplied(card: HTMLElement, category: string, state: CommentAppliedState | undefined): void {
+    let map = appliedComments.get(card);
+    if (!map) {
+        map = new Map();
+        appliedComments.set(card, map);
+    }
+    if (state) map.set(category, state);
+    else map.delete(category);
+}
+
+/** 一条评论文本容器对应的、可以插入「显示内容」按钮的位置。 */
+interface CommentTarget {
+    card: HTMLElement;
+    content: HTMLElement;
+    labelAnchor: HTMLElement;
+    actions: ShadowRoot | null;
+    replyButton: HTMLElement | null;
+    author: string;
+    text: string;
+}
+
+/** 收集一个评论宿主下所有可处理的评论（主评论 + 子评论）。 */
+function collectCommentTargets(root: HTMLElement): CommentTarget[] {
+    const targets: CommentTarget[] = [];
+    const shadow = root.shadowRoot;
+    if (!shadow) return targets;
+
+    const push = (card: HTMLElement | null) => {
+        const cardShadow = card?.shadowRoot;
+        if (!card || !cardShadow) return;
+        const content = cardShadow.querySelector<HTMLElement>("#content");
+        if (!content) return;
+
+        const userInfo = cardShadow.querySelector("bili-comment-user-info")?.shadowRoot;
+        const labelAnchor = userInfo?.querySelector<HTMLElement>("#user-up, #user-level") ?? content;
+        const actions = cardShadow.querySelector("bili-comment-action-buttons-renderer")?.shadowRoot ?? null;
+
+        targets.push({
+            card,
+            content,
+            labelAnchor,
+            actions,
+            replyButton: actions?.querySelector<HTMLElement>("#reply") ?? null,
+            author: readCommentAuthor(card),
+            text: readCommentText(content),
+        });
+    };
+
+    for (const thread of shadow.querySelectorAll<HTMLElement>("bili-comment-thread-renderer")) {
+        const threadShadow = thread.shadowRoot;
+        if (!threadShadow) continue;
+        push(threadShadow.querySelector<HTMLElement>("bili-comment-renderer"));
+
+        const repliesRoot = threadShadow.querySelector("bili-comment-replies-renderer")?.shadowRoot;
+        if (!repliesRoot) continue;
+        for (const reply of repliesRoot.querySelectorAll<HTMLElement>("bili-comment-reply-renderer")) {
+            push(reply);
+        }
+    }
+
+    return targets;
+}
+
+/**
+ * 评论区过滤：商品链接与疑似 AICG 共用同一条执行路径。
+ *
+ * 对每条评论分别评估两个类别，各自读自己在 `dynamicSponsorSelections` 里的选项，
+ * 再复用同一套 `labelSponsorStyle` / `hideSponsorContent` 去打标签或隐藏。
+ */
 function SponsorComment(root: HTMLElement) {
-    const action = getCategorySelection("dynamicSponsor_sponsor")?.option;
-    if (action === DynamicSponsorOption.Disabled) return;
+    const goodsOption = getCategorySelection("dynamicSponsor_sponsor")?.option ?? DynamicSponsorOption.Disabled;
+    const aicgOption = getAicgOption();
+    const goodsEnabled = goodsOption !== DynamicSponsorOption.Disabled;
+    const aicgEnabled = aicgOption !== DynamicSponsorOption.Disabled;
+    if (!goodsEnabled && !aicgEnabled) return;
 
+    const targets = collectCommentTargets(root);
+    if (!targets.length) return;
+
+    // 疑似 AICG 需要跨评论上下文，一次扫描只构建一次。
+    const aicgDetector = aicgEnabled ? new HeuristicAicgDetector() : null;
+    const aicgTuning = aicgEnabled ? getAicgTuning() : null;
+    const aicgContext = aicgEnabled
+        ? createAicgContext(
+            targets.map((target) => target.text),
+            targets.map((target) => target.author),
+        )
+        : null;
+
+    for (const target of targets) {
+        const whitelisted = isWhitelistedAuthor(target.author);
+
+        if (goodsEnabled && !whitelisted) {
+            applyGoodsCategory(target, goodsOption);
+        } else if (getApplied(target.card, "dynamicSponsor_sponsor")) {
+            revertCategory(target, "dynamicSponsor_sponsor");
+        }
+
+        if (aicgEnabled && !whitelisted && aicgDetector && aicgTuning && aicgContext) {
+            applyAicgCategory(target, aicgOption, aicgDetector, aicgTuning, aicgContext);
+        } else if (getApplied(target.card, AICG_CATEGORY)) {
+            // 类别被关掉后，把之前加上的标签/隐藏效果回滚，避免设置改了页面没变。
+            revertCategory(target, AICG_CATEGORY);
+        }
+    }
+
+    if (Config.config.commentSponsorReplyBlock && goodsEnabled) {
+        hideGoodsReplyThreads(root);
+    }
+}
+
+/** 白名单作者默认跳过；开启「无视白名单」后不再跳过。 */
+function isWhitelistedAuthor(author: string): boolean {
+    const channels = Config.config.whitelistedChannels;
+    if (!channels?.length) return false;
+    if (Config.config.dynamicAndCommentSponsorWhitelistedChannels) return false;
+    // 头像信息延迟加载时，不能因此把白名单作者的评论隐藏掉。
+    if (!author) return true;
+    return channels.some((channel) => channel.id === author);
+}
+
+function applyGoodsCategory(target: CommentTarget, option: DynamicSponsorOption): void {
+    const richText = target.content.querySelector("bili-rich-text")?.shadowRoot;
+    const hasGoods = Boolean(richText?.querySelector('a[data-type="goods"]'));
+    if (!hasGoods) return;
+
+    const applied = getApplied(target.card, "dynamicSponsor_sponsor");
+    if (applied?.option === option && applied.text === target.text) return;
+
+    if (applied) revertCategory(target, "dynamicSponsor_sponsor");
+
+    ensureLabel(target, "commentSponsorLabel", "dynamicSponsor_sponsor", false, null);
+
+    if (option === DynamicSponsorOption.Hide) {
+        // 操作区/回复按钮可能比正文晚挂载。此时先不记录「已处理」，
+        // 下一次扫描会再试一次，避免评论被永久漏掉。
+        if (!target.replyButton) return;
+        hideSponsorContent(target.content, target.replyButton, true);
+        // 打上本类别自己的标记，回滚时只复原自己造成的隐藏。
+        target.content.setAttribute(GOODS_HIDDEN_ATTR, "true");
+    }
+
+    setApplied(target.card, "dynamicSponsor_sponsor", { option, text: target.text });
+}
+
+function applyAicgCategory(
+    target: CommentTarget,
+    option: DynamicSponsorOption,
+    detector: HeuristicAicgDetector,
+    tuning: ReturnType<typeof getAicgTuning>,
+    context: ReturnType<typeof createAicgContext>,
+): void {
+    // 过短的评论不参与判定，也不改动 DOM。
+    const body = normalizeCommentText(stripMentionPrefix(target.text));
+    if (!body || codePointLength(body) < tuning.minLength) return;
+
+    const applied = getApplied(target.card, AICG_CATEGORY);
+    if (applied?.option === option && applied.text === body) return;
+
+    const result = detector.detect(
+        { text: target.text, minDetectableLength: tuning.minLength, peers: [], author: target.author },
+        context,
+    );
+    const decision = decideAicgOption(result, option, tuning);
+
+    if (decision.option === DynamicSponsorOption.Disabled) {
+        // 之前命中过、这次不命中（例如阈值调高了），要把旧效果撤掉。
+        if (applied) revertCategory(target, AICG_CATEGORY);
+        return;
+    }
+
+    if (applied) revertCategory(target, AICG_CATEGORY);
+
+    const debugText = tuning.debug
+        ? summarizeFeatures(decision.features).map((id) => chrome.i18n.getMessage(`aicgFeature_${id}`))
+        : undefined;
+    ensureLabel(target, "commentAicgLabel", AICG_CATEGORY, tuning.debug, debugText);
+
+    if (decision.option === DynamicSponsorOption.HideCard) {
+        if (target.card.getAttribute(AICG_CARD_HIDDEN_ATTR) !== "true") {
+            target.card.setAttribute(AICG_CARD_HIDDEN_ATTR, "true");
+            target.card.style.display = "none";
+        }
+    } else if (decision.option === DynamicSponsorOption.Hide) {
+        // 回复按钮可能晚挂载；没有它就先不记录已处理，下次扫描重试。
+        if (!target.replyButton) return;
+        hideSponsorContent(target.content, target.replyButton, true, {
+            toggleId: "showAicgContent",
+            showText: "aicgShowContent",
+            hideText: "aicgHideContent",
+        });
+        target.content.setAttribute(AICG_CONTENT_HIDDEN_ATTR, "true");
+    }
+
+    setApplied(target.card, AICG_CATEGORY, { option: decision.option, text: body });
+}
+
+/** 打标签；标签是插在锚点元素后面的兄弟节点，所以查重要在锚点父级里做。 */
+function ensureLabel(
+    target: CommentTarget,
+    labelId: string,
+    category: string,
+    debugMode: boolean,
+    debugText?: string[] | null,
+): void {
+    const anchor = target.labelAnchor;
+    const scope = (anchor.parentElement as ParentNode | null)
+        ?? (anchor.getRootNode() instanceof ShadowRoot ? (anchor.getRootNode() as ParentNode) : null);
+    if (!scope || scope.querySelector(`#${labelId}`)) return;
+
+    labelSponsorStyle(labelId, anchor, category, debugMode, debugText ?? null, true);
+}
+
+/** 回滚单个类别在一条评论上留下的效果，绝不动别的类别。 */
+function revertCategory(target: CommentTarget, category: string): void {
+    const isAicg = category === AICG_CATEGORY;
+    const labelId = isAicg ? "commentAicgLabel" : "commentSponsorLabel";
+    const toggleId = isAicg ? "showAicgContent" : "showDynamicSponsor";
+
+    const anchor = target.labelAnchor;
+    const scope = (anchor.parentElement as ParentNode | null)
+        ?? (anchor.getRootNode() instanceof ShadowRoot ? (anchor.getRootNode() as ParentNode) : null);
+    scope?.querySelector(`#${labelId}`)?.remove();
+    target.actions?.querySelector(`#${toggleId}`)?.remove();
+
+    // 只有本类别打过的标记才复原，避免把另一个类别的隐藏状态清掉。
+    const contentAttr = isAicg ? AICG_CONTENT_HIDDEN_ATTR : GOODS_HIDDEN_ATTR;
+    if (target.content.getAttribute(contentAttr) === "true") {
+        target.content.removeAttribute(contentAttr);
+        target.content.style.display = "";
+    }
+    if (isAicg && target.card.getAttribute(AICG_CARD_HIDDEN_ATTR) === "true") {
+        target.card.removeAttribute(AICG_CARD_HIDDEN_ATTR);
+        target.card.style.display = "";
+    }
+
+    setApplied(target.card, category, undefined);
+}
+
+/** 隐藏被判定为商品链接的评论下的默认子评论，保留「展开全部」入口。 */
+function hideGoodsReplyThreads(root: HTMLElement): void {
     for (const thread of root.shadowRoot.querySelectorAll<HTMLElement>("bili-comment-thread-renderer")) {
-        const comment = thread.shadowRoot?.querySelector("bili-comment-renderer");
-        const shadow = comment?.shadowRoot;
-        const richText = shadow?.querySelector("bili-rich-text")?.shadowRoot;
-        if (!richText?.querySelector('a[data-type="goods"]')) continue;
-
-        const avatar = shadow.querySelector("#user-avatar");
-        // A delayed avatar must not cause a whitelisted author's comment to be hidden.
-        if (Config.config.whitelistedChannels.length && !Config.config.dynamicAndCommentSponsorWhitelistedChannels) {
-            const author = avatar?.getAttribute("data-user-profile-id");
-            if (!author || Config.config.whitelistedChannels.some(ch => ch.id === author)) continue;
+        if (expandedReplyThreads.has(thread)) continue;
+        const repliesRoot = thread.shadowRoot?.querySelector("bili-comment-replies-renderer")?.shadowRoot;
+        if (!repliesRoot) continue;
+        for (const reply of repliesRoot.querySelectorAll<HTMLElement>("bili-comment-reply-renderer")) {
+            if (reply.style.display !== "none") reply.style.display = "none";
         }
-
-        const userInfo = shadow.querySelector("bili-comment-user-info")?.shadowRoot;
-        const labelAnchor = userInfo?.querySelector<HTMLElement>("#user-up, #user-level");
-        if (labelAnchor && !userInfo.querySelector("#commentSponsorLabel")) {
-            labelSponsorStyle("commentSponsorLabel", labelAnchor, "dynamicSponsor_sponsor", false, null, true);
-        }
-
-        if (action !== DynamicSponsorOption.Hide) continue;
-        const content = shadow.querySelector<HTMLElement>("#content");
-        const actions = shadow.querySelector("bili-comment-action-buttons-renderer")?.shadowRoot;
-        const replyButton = actions?.querySelector<HTMLElement>("#reply");
-        if (content && replyButton && !actions.querySelector("#showDynamicSponsor")) {
-            hideSponsorContent(content, replyButton, true);
-        }
-
-        if (Config.config.commentSponsorReplyBlock && !expandedReplyThreads.has(thread)) {
-            const repliesRoot = thread.shadowRoot.querySelector("bili-comment-replies-renderer")?.shadowRoot;
-            if (!repliesRoot) continue;
-            for (const reply of repliesRoot.querySelectorAll<HTMLElement>("bili-comment-reply-renderer")) {
-                if (reply.style.display !== "none") reply.style.display = "none";
-            }
-            const expandButton = repliesRoot.querySelector("bili-text-button")?.shadowRoot?.querySelector("button");
-            if (expandButton && !wiredReplyButtons.has(expandButton)) {
-                wiredReplyButtons.add(expandButton);
-                expandButton.addEventListener("click", () => {
-                    expandedReplyThreads.add(thread);
-                    for (const reply of repliesRoot.querySelectorAll<HTMLElement>("bili-comment-reply-renderer")) {
-                        reply.style.display = "";
-                    }
-                }, { once: true });
-            }
+        const expandButton = repliesRoot.querySelector("bili-text-button")?.shadowRoot?.querySelector("button");
+        if (expandButton && !wiredReplyButtons.has(expandButton)) {
+            wiredReplyButtons.add(expandButton);
+            expandButton.addEventListener("click", () => {
+                expandedReplyThreads.add(thread);
+                for (const reply of repliesRoot.querySelectorAll<HTMLElement>("bili-comment-reply-renderer")) {
+                    reply.style.display = "";
+                }
+            }, { once: true });
         }
     }
 }

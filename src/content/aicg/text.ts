@@ -153,10 +153,17 @@ export function noveltyRatio(text: string, df: ReadonlyMap<string, number>, thre
 
 /** 判断文本是否包含网络口语/拟声词/语气词，用于降低误判。 */
 const COLLOQUIAL_RE = /哈哈|嘿嘿|hhh|233|666|xswl|yyds|awsl|笑死|绝了|救命|无语|破防|emo|摆烂|摸鱼|躺平|喵|汪|嗷|鸭|捏|哒|嘞|噻|咯|呜|嗯呢|好嘞|行吧|得了|咋|啥|嘛|呗|喽|doge|滑稽|吃瓜|打call|金箍/i;
+
+const ANY_PUNCTUATION_RE = /[，。！？、；：,.!?;:~～…—\-（）()【】[\]「」『』"'“”‘’]/;
+
 export function looksColloquial(text: string): boolean {
     if (emojiCount(text) >= 2) return true;
     if (/(.)\1{2,}/.test(text.replace(/\s/g, ""))) return true; // 叠字：哈哈哈
-    return COLLOQUIAL_RE.test(text);
+    if (COLLOQUIAL_RE.test(text)) return true;
+    // 没有任何标点的短句基本是一句口头感叹（「不错不错，可以给你强化一下」这类），
+    // 结构类特征对它没有意义，直接按口语处理。
+    if (codePointLength(text) < 24 && !ANY_PUNCTUATION_RE.test(text)) return true;
+    return false;
 }
 
 /** 人设自称：AI 助手常见的自我指称。 */

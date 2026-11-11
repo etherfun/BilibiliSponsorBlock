@@ -140,6 +140,8 @@ export class ProtoConfig<T extends SyncStorage, U extends LocalStorage> {
             deleteProperty(obj: SyncStorage, prop: keyof SyncStorage) {
                 nextToUpdate.delete(prop);
                 pendingSync.delete(prop);
+                // 缓存里也要删掉，否则删除后 get 仍会回读到旧值。
+                if (self.cachedSyncConfig) delete self.cachedSyncConfig[prop];
                 void chrome.storage.sync.remove(<string>prop);
 
                 return true;

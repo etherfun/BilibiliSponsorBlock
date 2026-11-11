@@ -14,7 +14,6 @@ import {
     HideFullVideoLabels,
     WhitelistedChannel,
 } from "./types";
-import { AicgAction, isAicgAction } from "./content/aicg/types";
 import { Keybind, ProtoConfig, keybindEquals } from "./config/config";
 import { migrateServerPreferences, normalizeServerPreferences, ServerPreferences, OfficialServers } from "./config/officialServers";
 import { migrateSkipRulesRollout, SkipRulesRollout, SkipRulesNotice } from "./config/skipRulesRollout";
@@ -137,9 +136,7 @@ interface SBConfig {
     dynamicSpaceSponsorBlocker: boolean;
     commentSponsorBlock: boolean;
     commentSponsorReplyBlock: boolean;
-    /** 疑似 AICG 内容处理模式；默认禁用，避免升级后改变用户现有体验 */
-    commentAicgAction: AicgAction;
-    /** 达到该疑似程度才执行处理 */
+    /** 疑似 AICG 的判定阈值；处理方式由 dynamicSponsorSelections 的 dynamicSponsor_aicg 决定 */
     commentAicgThreshold: number;
     /** 短于该长度的评论不做结构类检测 */
     commentAicgMinLength: number;
@@ -200,6 +197,7 @@ interface SBConfig {
         "dynamicSponsor_sponsor": PreviewBarOption;
         "dynamicSponsor_forward_sponsor": PreviewBarOption;
         "dynamicSponsor_suspicion_sponsor": PreviewBarOption;
+        "dynamicSponsor_aicg": PreviewBarOption;
     };
 }
 
@@ -271,6 +269,20 @@ class ConfigClass extends ProtoConfig<SBConfig, SBStorage> {
         chrome.storage.local.set({
             ...this.localDefaults,
         });
+    }
+}
+
+/** 旧版独立 AICG 模式值（0 禁用 / 1 标签 / 2 隐藏内容 / 3 隐藏卡片）到动态类别选项的映射，仅用于一次性迁移。 */
+function legacyAicgOption(value: unknown): DynamicSponsorOption {
+    switch (Number(value)) {
+        case 1:
+            return DynamicSponsorOption.ShowOverlay;
+        case 2:
+            return DynamicSponsorOption.Hide;
+        case 3:
+            return DynamicSponsorOption.HideCard;
+        default:
+            return DynamicSponsorOption.Disabled;
     }
 }
 
@@ -368,17 +380,51 @@ function migrateOldSyncFormats(config: SBConfig, initialSyncKeys: ReadonlySet<st
         config["dynamicAndCommentSponsorBlocker"] = config["dynamicSponsorBlocker"];
         delete config["dynamicSponsorBlocker"];
     }
-    // 疑似 AICG 设置：旧版本不存在这些键，保持默认（禁用）。
-    // 只校验枚举合法性，非法值回落到默认，避免用户导入配置后页面崩溃。
-    if (!isAicgAction(config["commentAicgAction"])) {
-        config["commentAicgAction"] = syncDefaults.commentAicgAction;
-    }
+    // 疑似 AICG 设置：微调参数只校验类型与范围；
+    // 处理方式走 dynamicSponsorSelections 里的 dynamicSponsor_aicg 类别，与商品链接共用一套机制。
     if (typeof config["commentAicgThreshold"] !== "number"
         || config["commentAicgThreshold"] < 0 || config["commentAicgThreshold"] > 1) {
         config["commentAicgThreshold"] = syncDefaults.commentAicgThreshold;
     }
     if (typeof config["commentAicgMinLength"] !== "number" || config["commentAicgMinLength"] < 0) {
         config["commentAicgMinLength"] = syncDefaults.commentAicgMinLength;
+    }
+
+    // 旧版把 AICG 处理方式单独存成 commentAicgAction（0 禁用 / 1 标签 / 2 隐藏内容 / 3 隐藏卡片）。
+    // 现在它属于动态类别表，这里做一次性迁移，避免已经设过的人静默丢失设置。
+    const legacyAicgAction = config["commentAicgAction"];
+    if (legacyAicgAction !== undefined) {
+        const mapped = legacyAicgOption(legacyAicgAction);
+        const selections = Array.isArray(config["dynamicSponsorSelections"])
+            ? [...config["dynamicSponsorSelections"]]
+            : [];
+        const index = selections.findIndex((selection) => selection?.name === "dynamicSponsor_aicg");
+        const existing = index >= 0 ? Number(selections[index].option) : DynamicSponsorOption.Disabled;
+
+        // 默认值就是「禁用」，所以「已存在且非禁用」才说明用户自己选过，这时不动它。
+        if (mapped !== DynamicSponsorOption.Disabled && existing === DynamicSponsorOption.Disabled) {
+            const entry = { name: "dynamicSponsor_aicg" as Category, option: mapped };
+            if (index >= 0) selections[index] = entry;
+            else selections.push(entry);
+            config["dynamicSponsorSelections"] = selections;
+        }
+        delete config["commentAicgAction"];
+    }
+
+    // 类别表里的 AICG 选项也要挡住非法值（导入的历史配置可能带未知枚举）。
+    if (Array.isArray(config["dynamicSponsorSelections"])) {
+        config["dynamicSponsorSelections"] = config["dynamicSponsorSelections"].map((selection) => {
+            if (selection?.name !== "dynamicSponsor_aicg") return selection;
+            const option = Number(selection.option);
+            return {
+                ...selection,
+                option: option === DynamicSponsorOption.ShowOverlay
+                    || option === DynamicSponsorOption.Hide
+                    || option === DynamicSponsorOption.HideCard
+                    ? option
+                    : DynamicSponsorOption.Disabled,
+            };
+        });
     }
     if (config["dynamicSponsorWhitelistedChannels"]) {
         config["dynamicAndCommentSponsorWhitelistedChannels"] = config["dynamicSponsorWhitelistedChannels"];
@@ -525,7 +571,6 @@ const syncDefaults = {
     dynamicSpaceSponsorBlocker: false,
     commentSponsorBlock: true,
     commentSponsorReplyBlock: false,
-    commentAicgAction: AicgAction.Disabled,
     commentAicgThreshold: 0.55,
     commentAicgMinLength: 12,
     commentAicgDebug: false,
@@ -713,6 +758,11 @@ const syncDefaults = {
             name: "dynamicSponsor_suspicion_sponsor" as Category,
             option: DynamicSponsorOption.Disabled,
         },
+        {
+            // 疑似 AICG 内容：与上面几个类别并列，默认禁用，避免升级后改变现有体验
+            name: "dynamicSponsor_aicg" as Category,
+            option: DynamicSponsorOption.Disabled,
+        },
     ],
     dynamicSponsorTypes: {
         dynamicSponsor_sponsor: {
@@ -725,6 +775,10 @@ const syncDefaults = {
         },
         dynamicSponsor_suspicion_sponsor: {
             color: "#a6634a",
+            opacity: "0.7",
+        },
+        dynamicSponsor_aicg: {
+            color: "#8e2de2",
             opacity: "0.7",
         },
     }

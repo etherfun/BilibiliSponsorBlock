@@ -42,13 +42,39 @@ import {
 const FEATURE_WEIGHTS: Record<AicgFeatureId, number> = {
     templateReuse: 2.0,
     crossCommentSimilarity: 2.0,
+    sharedPhraseCoverage: 1.8,
     duplicateFamily: 1.0,
     lowInformationDensity: 1.0,
+    aiPhraseDensity: 0.6,
     personaSelfReference: 0.8,
     structuralUniformity: 0.8,
     reportToOwner: 0.6,
     punctuationRegularity: 0.5,
 };
+
+/**
+ * 通用书面语/套话套路。刻意只收跨领域的表达，不收任何具体视频的口头禅，
+ * 避免检测器只对某一个评论区有效。
+ */
+const AI_PHRASES = [
+    "综上所述", "总而言之", "总的来说", "简而言之", "归根结底",
+    "值得注意的是", "值得一提的是", "需要说明的是", "不难看出", "显而易见",
+    "毋庸置疑", "由此可见", "可以说", "换言之", "换句话说",
+    "首先", "其次", "再次", "最后", "第一点", "第二点", "第三点",
+    "一方面", "另一方面", "不仅", "而且", "与此同时", "除此之外", "此外",
+    "建议", "总结", "核心", "关键在于", "本质上", "整体来看", "从整体",
+    "提升", "赋能", "闭环", "抓手", "维度", "层面", "链路", "范式", "颗粒度",
+    "在此基础上", "进一步", "从而", "因此", "所以", "总的来说",
+];
+
+/** 统计一条文本命中的通用套话次数（不重复计同一条短语的多次出现，避免刷词）。 */
+function countAiPhrases(text: string): number {
+    let hits = 0;
+    for (const phrase of AI_PHRASES) {
+        if (text.includes(phrase)) hits++;
+    }
+    return hits;
+}
 
 /** 特征强度到综合分数的放大系数，用于把 0~1 的证据映射到可操作的疑似程度。 */
 const CONFIDENCE_SCALE = 1.25;
@@ -66,30 +92,85 @@ const NOVELTY_DF_THRESHOLD = 4;
 const SIMILARITY_BASELINE = 0.28;
 /** 重复家族至少这么大才开始产生证据。 */
 const FAMILY_BASELINE = 2;
+/**
+ * 跨评论特征（模板复用 / 相似度 / 短语覆盖）要求的最小正文长度。
+ * 太短的评论 bigram 数量少，一个常用词就能把比例刷高，造成一对一误伤
+ * （例如「不错不错，可以给你在强化一下」这种真人短句）。
+ */
+const MIN_CROSS_EVIDENCE_LENGTH = 20;
+
+/**
+ * 短语复用：长度固定为 PHRASE_LEN 个字符、且被至少 PHRASE_AUTHOR_DF 个
+ * **不同作者**用过的片段。要求跨作者，是为了把「同一个人刷屏」和
+ * 「一批账号共用同一套话术」区分开 —— 后者才是批量生成的强证据。
+ */
+const PHRASE_LEN = 8;
+const PHRASE_AUTHOR_DF = 4;
 
 export interface AicgContext {
     /** 同一评论集合内的其它评论文本（不含被检测评论自身） */
     peerTexts: readonly string[];
     /** bigram -> 包含它的评论条数 */
     bigramDf: Map<string, number>;
+    /** bigram -> 包含它的不同作者数 */
+    bigramAuthorDf: Map<string, number>;
     /** 归一化文本 -> 重复家族键 */
     familyOf: (normalizedText: string) => string;
     /** 家族键 -> 家族大小 */
     familySize: (familyKey: string) => number;
+    /** 跨作者共享短语（固定长度字符片段），用于计算短语覆盖度 */
+    sharedPhrases: Set<string>;
 }
 
 /**
  * 预计算跨评论统计，避免对每条评论都做 O(n²) 的两两比较。
  * 调用方对同一屏评论构建一次上下文，然后逐条检测。
+ *
+ * `peerAuthors` 可选，与 `peerTexts` 一一对应；拿不到作者时退化为按评论数统计。
  */
-export function createAicgContext(peerTexts: readonly string[]): AicgContext {
+export function createAicgContext(
+    peerTexts: readonly string[],
+    peerAuthors?: readonly string[],
+): AicgContext {
     const normalized = peerTexts.map((peer) => normalizeCommentText(stripMentionPrefix(peer)));
+    const authors = peerTexts.map((_, index) => peerAuthors?.[index] || `#${index}`);
 
     const bigramDf = new Map<string, number>();
-    for (const text of normalized) {
-        for (const gram of new Set(charNgrams(text, 2))) {
+    /** 每个 bigram 被哪些作者用过 */
+    const bigramAuthors = new Map<string, Set<string>>();
+    for (let i = 0; i < normalized.length; i++) {
+        for (const gram of new Set(charNgrams(normalized[i], 2))) {
             bigramDf.set(gram, (bigramDf.get(gram) ?? 0) + 1);
+            let set = bigramAuthors.get(gram);
+            if (!set) {
+                set = new Set();
+                bigramAuthors.set(gram, set);
+            }
+            set.add(authors[i]);
         }
+    }
+    const bigramAuthorDf = new Map<string, number>();
+    const sharedPhrases = new Set<string>();
+    for (const [gram, set] of bigramAuthors) {
+        bigramAuthorDf.set(gram, set.size);
+    }
+
+    // 短语按固定长度重新统计：bigram 太短，不能代表「一套话术」。
+    const phraseAuthors = new Map<string, Set<string>>();
+    for (let i = 0; i < normalized.length; i++) {
+        const text = normalized[i];
+        for (let at = 0; at + PHRASE_LEN <= text.length; at++) {
+            const phrase = text.slice(at, at + PHRASE_LEN);
+            let set = phraseAuthors.get(phrase);
+            if (!set) {
+                set = new Set();
+                phraseAuthors.set(phrase, set);
+            }
+            set.add(authors[i]);
+        }
+    }
+    for (const [phrase, set] of phraseAuthors) {
+        if (set.size >= PHRASE_AUTHOR_DF) sharedPhrases.add(phrase);
     }
 
     // 并查集：把「归一化后完全相同」或「bigram Jaccard >= 0.5」的评论合并成家族。
@@ -145,11 +226,13 @@ export function createAicgContext(peerTexts: readonly string[]): AicgContext {
     return {
         peerTexts,
         bigramDf,
+        bigramAuthorDf,
         familyOf: (text) => {
             const root = textToRoot.get(text);
             return root === undefined ? text : String(root);
         },
         familySize: (key) => familyKeyToSize.get(key) ?? 1,
+        sharedPhrases,
     };
 }
 
@@ -206,7 +289,19 @@ export class HeuristicAicgDetector implements AicgDetector {
             });
         }
 
-        // ---- 弱证据 4：信息密度 ----
+        // ---- 强证据 4：跨作者共享短语覆盖度 ----
+        // 改写过措辞的 AI 评论 bigram 相似度可能不高，但「同一套事实包」的长片段
+        // 仍会被多个不同作者复用。这一项专门补改写型的召回。
+        const phraseStrength = this.sharedPhraseCoverageStrength(normalizedText, ctx, tooShort);
+        if (phraseStrength > 0) {
+            features.push({
+                id: "sharedPhraseCoverage",
+                strength: phraseStrength,
+                reason: `sharedPhraseCoverage:${phraseStrength.toFixed(2)}`,
+            });
+        }
+
+        // ---- 弱证据 5：信息密度 ----
         const densityStrength = this.lowInformationStrength(normalizedText, ctx, tooShort);
         if (densityStrength > 0) {
             features.push({
@@ -216,10 +311,25 @@ export class HeuristicAicgDetector implements AicgDetector {
             });
         }
 
-        // ---- 弱证据 5：人设自我指称 ----
+        // ---- 弱证据 6：通用 AI 套话密度 ----
+        // 这是「关键词」层面的通用特征（不是本数据集特有的口头禅），单独很弱，
+        // 但在跨评论证据存在时能帮改写型文本过线。
+        const phraseDensity = this.aiPhraseDensityStrength(body, textLength, tooShort);
+        if (phraseDensity > 0) {
+            features.push({
+                id: "aiPhraseDensity",
+                strength: phraseDensity,
+                reason: `aiPhraseDensity:${phraseDensity.toFixed(2)}`,
+            });
+        }
+
+        // ---- 弱证据 7：人设自我指称 ----
         // 单独的「本鲸」可能只是真人玩梗，所以强度按跨评论证据缩放：
         // 没有跨评论证据时不产生特征，有证据时才作为辅助加权。
-        const crossEvidence = Math.max(templateStrength, similarityStrength, familyStrength >= 0.2 ? familyStrength : 0);
+        const crossEvidence = Math.max(
+            templateStrength, similarityStrength, phraseStrength,
+            familyStrength >= 0.2 ? familyStrength : 0,
+        );
         if (!tooShort && hasPersonaSelfReference(body) && looksLikeReportToOwner(body, mentioned)
             && crossEvidence > CROSS_COMMENT_REQUIRED * 0.5) {
             features.push({
@@ -229,7 +339,7 @@ export class HeuristicAicgDetector implements AicgDetector {
             });
         }
 
-        // ---- 弱证据 6：汇报式结构 ----
+        // ---- 弱证据 8：汇报式结构 ----
         if (!tooShort && looksLikeReportToOwner(body, mentioned)) {
             features.push({
                 id: "reportToOwner",
@@ -238,7 +348,7 @@ export class HeuristicAicgDetector implements AicgDetector {
             });
         }
 
-        // ---- 弱证据 7：句长分布过于均匀 ----
+        // ---- 弱证据 9：句长分布过于均匀 ----
         const uniformity = this.structuralUniformityStrength(body, textLength, tooShort);
         if (uniformity > 0) {
             features.push({
@@ -248,7 +358,7 @@ export class HeuristicAicgDetector implements AicgDetector {
             });
         }
 
-        // ---- 弱证据 8：标点使用机械 ----
+        // ---- 弱证据 10：标点使用机械 ----
         const punct = this.punctuationRegularityStrength(body, textLength, tooShort);
         if (punct > 0) {
             features.push({
@@ -274,9 +384,53 @@ export class HeuristicAicgDetector implements AicgDetector {
         };
     }
 
+    /**
+     * 跨作者共享短语覆盖度：该评论有多少比例的字符被「多个不同作者都用过的片段」覆盖。
+     *
+     * 与 bigram 相似度的区别：相似度要求整体重合，这里只看「事实包」是否被复用，
+     * 所以改写句式的 AI 评论也能被抓到。
+     */
+    private sharedPhraseCoverageStrength(text: string, ctx: AicgContext, tooShort: boolean): number {
+        if (tooShort || text.length < MIN_CROSS_EVIDENCE_LENGTH || ctx.sharedPhrases.size === 0) return 0;
+
+        // 滑动窗口逐位判断，复杂度 O(n)，不用对每个短语做 indexOf。
+        const covered = new Array<boolean>(text.length).fill(false);
+        let coveredCount = 0;
+        for (let at = 0; at + PHRASE_LEN <= text.length; at++) {
+            if (!ctx.sharedPhrases.has(text.slice(at, at + PHRASE_LEN))) continue;
+            for (let k = at; k < at + PHRASE_LEN; k++) {
+                if (!covered[k]) {
+                    covered[k] = true;
+                    coveredCount++;
+                }
+            }
+        }
+
+        const ratio = coveredCount / text.length;
+        // 0.25 起步：真人偶尔也会蹭到一两个流行短语，不到这个比例不算证据。
+        if (ratio < 0.25) return 0;
+        return Math.min(1, (ratio - 0.25) / 0.55);
+    }
+
+    /**
+     * 通用 AI 套话密度。
+     *
+     * 这里用的是**跨领域**的书面语套路（总结词、连接词、拔高句），
+     * 不是某个视频特有的口头禅，所以不会只对某一个评论区有效。
+     */
+    private aiPhraseDensityStrength(text: string, textLength: number, tooShort: boolean): number {
+        if (tooShort || textLength < 30) return 0;
+        const hits = countAiPhrases(text);
+        if (hits === 0) return 0;
+        // 每 40 字命中 1 次算满强度，避免长评论按绝对次数压制短评论。
+        const density = hits / Math.max(1, textLength / 40);
+        return Math.min(1, density);
+    }
+
     private templateReuseStrength(text: string, ctx: AicgContext, tooShort: boolean): number {
         const grams = charNgrams(text, 2);
-        if (!grams.size || tooShort) return 0;
+        // 短评论的 bigram 太少，随便一个常用词就能把比例刷高，因此不参与模板判定。
+        if (!grams.size || tooShort || text.length < MIN_CROSS_EVIDENCE_LENGTH) return 0;
         let templateGrams = 0;
         for (const g of grams) {
             // 计入被检测评论自身，df=1；阈值 5 表示「至少 5 条评论都在用」。
@@ -289,7 +443,7 @@ export class HeuristicAicgDetector implements AicgDetector {
     }
 
     private crossCommentSimilarityStrength(text: string, ctx: AicgContext, tooShort: boolean): number {
-        if (tooShort) return 0;
+        if (tooShort || text.length < MIN_CROSS_EVIDENCE_LENGTH) return 0;
         const grams = charNgrams(text, 2);
         if (grams.size < 8) return 0;
         let best = 0;
@@ -355,7 +509,12 @@ export class HeuristicAicgDetector implements AicgDetector {
  * 关键设计：只有「跨评论」的强证据才能把疑似程度推过阈值。
  * 单条评论的结构特征（句长均匀、标点机械）只作为辅助证据，
  * 防止把「写得规范的真人长评论」误判为 AI —— 这是最容易造成误伤的地方。
+ *
+ * 强度低于 NOISE_FLOOR 的特征直接不参与计算：否则一堆接近 0 的弱特征会把
+ * 真正可疑的评论拉低到阈值以下（早期版本就吃过这个亏）。
  */
+const NOISE_FLOOR = 0.15;
+
 function combine(features: readonly AicgFeatureEvidence[], boost: number): AicgConfidence {
     if (!features.length) return 0;
 
@@ -365,11 +524,15 @@ function combine(features: readonly AicgFeatureEvidence[], boost: number): AicgC
     let hasDuplicateEvidence = false;
 
     for (const feature of features) {
+        if (feature.strength < NOISE_FLOOR) continue;
+
         const weight = FEATURE_WEIGHTS[feature.id];
         numerator += weight * feature.strength;
         denominator += weight;
 
-        if (feature.id === "crossCommentSimilarity" || feature.id === "templateReuse") {
+        if (feature.id === "crossCommentSimilarity"
+            || feature.id === "templateReuse"
+            || feature.id === "sharedPhraseCoverage") {
             strongestCrossComment = Math.max(strongestCrossComment, feature.strength);
         }
         if (feature.id === "duplicateFamily" && feature.strength > 0.2) {
@@ -395,13 +558,17 @@ function emptyResult(normalizedText: string, textLength: number, tooShort: boole
 /** 便捷函数：一次性检测一组评论并返回每条结果。 */
 export function detectComments(
     texts: readonly string[],
-    options?: { minDetectableLength?: number },
+    options?: { minDetectableLength?: number; authors?: readonly string[] },
 ): AicgDetectionResult[] {
-    const context = createAicgContext(texts);
+    const context = createAicgContext(texts, options?.authors);
     const detector = new HeuristicAicgDetector();
-    return texts.map((text) =>
+    return texts.map((text, index) =>
         detector.detect(
-            { text, minDetectableLength: options?.minDetectableLength },
+            {
+                text,
+                minDetectableLength: options?.minDetectableLength,
+                author: options?.authors?.[index],
+            },
             context,
         ),
     );

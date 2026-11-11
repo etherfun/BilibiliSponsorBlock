@@ -2811,51 +2811,12 @@
     },
     "dynamicSponsorRegexRuleReset": {
         "message": "重置"
-    },
-    "commentAicg": {
-        "message": "疑似 AICG 内容"
-    },
-    "commentAicgDescription": {
-        "message": "基于评论文本特征识别疑似由 AI 生成或批量产生的评论，仅作用于评论区。结果表示「疑似程度」，并非确定的 AI 身份判定。"
-    },
-    "commentAicgAction": {
-        "message": "处理方式:"
-    },
-    "commentAicgActionDescription": {
-        "message": "禁用：不进行检测；仅添加标签：保留评论并标注「疑似 AI」；隐藏内容：隐藏评论正文但保留头像、昵称与交互按钮；隐藏卡片：整条评论不显示。"
-    },
-    "commentAicgActionDisabled": {
-        "message": "禁用"
-    },
-    "commentAicgActionLabel": {
-        "message": "仅添加标签"
-    },
-    "commentAicgActionHideContent": {
-        "message": "隐藏内容"
-    },
-    "commentAicgActionHideCard": {
-        "message": "隐藏卡片"
-    },
-    "commentAicgThreshold": {
-        "message": "判定阈值:"
-    },
-    "commentAicgThresholdDescription": {
-        "message": "疑似程度达到该值才会执行处理。数值越高越不容易误伤真人评论，但也更容易漏掉疑似评论。默认 0.55。"
-    },
-    "commentAicgMinLength": {
-        "message": "最小检测长度:"
-    },
-    "commentAicgMinLengthDescription": {
-        "message": "短于该长度（字符数）的评论不做结构类检测，避免把口语化的短评论误判。默认 12。"
-    },
+    },
     "commentAicgDebug": {
         "message": "显示命中特征"
     },
     "commentAicgDebugDescription": {
         "message": "在「疑似 AI」标签上显示命中的检测特征，用于判断该功能是否准确。"
-    },
-    "aicgSuspectLabel": {
-        "message": "疑似 AI"
     },
     "aicgShowContent": {
         "message": "显示内容"
@@ -2887,10 +2848,28 @@
     "aicgFeature_punctuationRegularity": {
         "message": "标点使用机械"
     },
-    "category_commentAicg": {
+    "HideCard_DynamicSponsor": {
+        "message": "隐藏卡片"
+    },
+    "commentAicgThresholdShort": {
+        "message": "判定阈值:"
+    },
+    "commentAicgMinLengthShort": {
+        "message": "最小检测长度:"
+    },
+    "category_dynamicSponsor_aicg": {
         "message": "疑似 AICG 内容"
     },
-    "category_commentAicg_description": {
-        "message": "评论文本呈现出模板复用、跨评论高度相似、句式过于均匀等特征。这是疑似程度判断，不代表确定的 AI 身份。"
+    "category_dynamicSponsor_aicg_description": {
+        "message": "基于评论文本特征识别疑似由 AI 生成或批量产生的评论，仅作用于评论区。命中后按本行选项处理：仅添加标签 / 隐藏内容 / 隐藏卡片。结果表示「疑似程度」，并非确定的 AI 身份判定。下方的判定阈值、最小检测长度和调试开关只对这一类别生效。"
+    },
+    "commentAicgDebugDescription": {
+        "message": "在「疑似 AICG 内容」标签上显示命中的检测特征，用于判断该功能是否准确。"
+    },
+    "aicgFeature_sharedPhraseCoverage": {
+        "message": "跨作者短语复用"
+    },
+    "aicgFeature_aiPhraseDensity": {
+        "message": "书面套话密度"
     }
 }

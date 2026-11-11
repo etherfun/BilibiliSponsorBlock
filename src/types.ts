@@ -37,6 +37,11 @@ export enum DynamicSponsorOption {
     Disabled,
     ShowOverlay,
     Hide,
+    /**
+     * 直接隐藏整条内容（评论卡片 / 动态卡片）。
+     * 只对支持「整条隐藏」的类别启用，例如评论区里的疑似 AICG 内容。
+     */
+    HideCard,
 }
 
 export interface DynamicSponsorSelection {

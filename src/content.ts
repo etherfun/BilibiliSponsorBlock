@@ -33,6 +33,7 @@ import { setupMessageListener } from "./content/messageHandler";
 import { addHotkeyListener } from "./content/hotkeyHandler";
 import { registerVideoListeners } from "./content/videoListeners";
 import { DynamicListener, CommentListener } from "./render/DynamicAndCommentSponsorBlock";
+import { shouldProcessComments } from "./content/aicg/settings";
 import { setMessageNotice } from "./render/MessageNotice";
 import { checkPageForNewThumbnails, setupThumbnailListener } from "./thumbnail-utils/thumbnailManagement";
 import {
@@ -135,7 +136,7 @@ function init(): void {
 
     if (
         [PageType.Video, PageType.List, PageType.Dynamic, PageType.Channel, PageType.Opus, PageType.Festival].includes(getPageType()) &&
-        (Config.config.dynamicAndCommentSponsorBlocker && Config.config.commentSponsorBlock)
+        shouldProcessComments()
     ) {
         CommentListener();
     }
@@ -220,7 +221,7 @@ async function videoIDChange(): Promise<void> {
 
     if (
         [PageType.Video, PageType.List, PageType.Dynamic, PageType.Channel, PageType.Opus, PageType.Festival].includes(getPageType()) &&
-        (Config.config.dynamicAndCommentSponsorBlocker && Config.config.commentSponsorBlock)
+        shouldProcessComments()
     ) {
         CommentListener();
     }
