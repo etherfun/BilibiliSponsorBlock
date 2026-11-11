@@ -137,11 +137,14 @@ test("仅添加标签：评论保持可见并带一个标签", async ({ extensio
     const label = page.locator("bili-comments #commentAicgLabel").first();
     // 文案用的是类别名，与商品链接类别同一个 labelSponsorStyle 组件
     expect(await label.textContent()).toContain("疑似 AICG 内容");
-    // 标签必须真的看得见：它靠 SVG 图标撑起来，不能塌成一条细线
+    // 标签必须真的看得见，而且尺寸要正常：它靠 SVG 图标撑起来，
+    // 一旦缺了 id 对应的尺寸规则，图标会被撑成满屏（曾经真的发生过）。
     const box = await label.boundingBox();
     expect(box).not.toBeNull();
     expect(box.width).toBeGreaterThan(16);
     expect(box.height).toBeGreaterThan(12);
+    expect(box.width).toBeLessThan(120);
+    expect(box.height).toBeLessThan(60);
     // 评论正文仍然可见
     await expect(page.locator("bili-comments #content").first()).toBeVisible();
 });

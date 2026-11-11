@@ -409,6 +409,55 @@ function shadowRootStyle(element: HTMLElement) {
 
             #commentSponsorLabel .Match {
                 margin-top: 5px;
+            }
+
+            /*bilibili Comment AICG label —— 与上面的商品链接标签同一套尺寸，
+              否则 SVG 图标没有宽高约束会被撑成满屏。*/
+            #commentAicgLabel {
+                display: inline-flex;
+                background-color: var(--category-color, #fff);
+                border-radius: 1.5em;
+                padding: 0.3em;
+                margin: 0.3em;
+                align-items: center;
+                transition: border-radius 0.4s 0.05s;
+	            z-index: 99;
+            }
+
+            #commentAicgLabel svg {
+                width: 1.1em;
+                height: 1.1em;
+                fill: var(--category-text-color, #fff);
+            }
+
+            #commentAicgLabel .Text-Group {
+                display: none;
+                flex-direction: column;
+                padding-left: 0.25em;
+                font-size: 0.8em;
+                color: var(--category-text-color, #fff);
+            }
+
+            #commentAicgLabel .Label {
+                display: inline-block;
+            }
+
+            #commentAicgLabel .Match {
+                margin-top: 5px;
+            }
+
+            #showAicgContent {
+                border: none;
+                background: transparent;
+                cursor: pointer;
+                padding: 0;
+            }
+
+            #showAicgContent svg {
+                margin-right: 4px;
+                height: 1.2em;
+                width: 1.2em;
+                fill: var(--text2);
             }`;
     element.parentNode!.insertBefore(style, element.nextSibling);
 }
