@@ -14,6 +14,7 @@ import {
     HideFullVideoLabels,
     WhitelistedChannel,
 } from "./types";
+import { AicgAction, isAicgAction } from "./content/aicg/types";
 import { Keybind, ProtoConfig, keybindEquals } from "./config/config";
 import { migrateServerPreferences, normalizeServerPreferences, ServerPreferences, OfficialServers } from "./config/officialServers";
 import { migrateSkipRulesRollout, SkipRulesRollout, SkipRulesNotice } from "./config/skipRulesRollout";
@@ -136,6 +137,14 @@ interface SBConfig {
     dynamicSpaceSponsorBlocker: boolean;
     commentSponsorBlock: boolean;
     commentSponsorReplyBlock: boolean;
+    /** 疑似 AICG 内容处理模式；默认禁用，避免升级后改变用户现有体验 */
+    commentAicgAction: AicgAction;
+    /** 达到该疑似程度才执行处理 */
+    commentAicgThreshold: number;
+    /** 短于该长度的评论不做结构类检测 */
+    commentAicgMinLength: number;
+    /** 在标签上显示命中的检测特征，便于用户判断 */
+    commentAicgDebug: boolean;
 
     showNewIcon: boolean;
 
@@ -231,6 +240,15 @@ class ConfigClass extends ProtoConfig<SBConfig, SBStorage> {
         if (key === "barTypes") return decodeBarColors(value, this.syncDefaults.barTypes);
         if (key === "dynamicSponsorTypes") return decodeDynamicSponsorColors(value, this.syncDefaults.dynamicSponsorTypes);
         if (key === "serverPreferences" && value !== null) return normalizeServerPreferences(value as ServerPreferences);
+        // 设置页的 number 输入读回的是字符串，统一在这里转成数字，
+        // 让内存值、存储值和导出文件里的类型保持一致。
+        if (key === "commentAicgThreshold" || key === "commentAicgMinLength") {
+            if (typeof value === "string" && value.trim() !== "") {
+                const parsed = Number(value);
+                if (Number.isFinite(parsed)) return parsed;
+            }
+            return value;
+        }
         return value;
     }
 
@@ -349,6 +367,18 @@ function migrateOldSyncFormats(config: SBConfig, initialSyncKeys: ReadonlySet<st
     if (config["dynamicSponsorBlocker"]) {
         config["dynamicAndCommentSponsorBlocker"] = config["dynamicSponsorBlocker"];
         delete config["dynamicSponsorBlocker"];
+    }
+    // 疑似 AICG 设置：旧版本不存在这些键，保持默认（禁用）。
+    // 只校验枚举合法性，非法值回落到默认，避免用户导入配置后页面崩溃。
+    if (!isAicgAction(config["commentAicgAction"])) {
+        config["commentAicgAction"] = syncDefaults.commentAicgAction;
+    }
+    if (typeof config["commentAicgThreshold"] !== "number"
+        || config["commentAicgThreshold"] < 0 || config["commentAicgThreshold"] > 1) {
+        config["commentAicgThreshold"] = syncDefaults.commentAicgThreshold;
+    }
+    if (typeof config["commentAicgMinLength"] !== "number" || config["commentAicgMinLength"] < 0) {
+        config["commentAicgMinLength"] = syncDefaults.commentAicgMinLength;
     }
     if (config["dynamicSponsorWhitelistedChannels"]) {
         config["dynamicAndCommentSponsorWhitelistedChannels"] = config["dynamicSponsorWhitelistedChannels"];
@@ -495,6 +525,10 @@ const syncDefaults = {
     dynamicSpaceSponsorBlocker: false,
     commentSponsorBlock: true,
     commentSponsorReplyBlock: false,
+    commentAicgAction: AicgAction.Disabled,
+    commentAicgThreshold: 0.55,
+    commentAicgMinLength: 12,
+    commentAicgDebug: false,
 
     showNewIcon: true,
 

@@ -2801,5 +2801,86 @@
     },
     "dynamicSponsorRegexRuleReset": {
         "message": "重設"
+    },
+    "commentAicg": {
+        "message": "疑似 AICG 內容"
+    },
+    "commentAicgDescription": {
+        "message": "基於評論文字特徵識別疑似由 AI 產生或批量產生的評論，僅作用於評論區。結果表示「疑似程度」，並非確定的 AI 身分判定。"
+    },
+    "commentAicgAction": {
+        "message": "處理方式:"
+    },
+    "commentAicgActionDescription": {
+        "message": "停用：不進行檢測；僅新增標籤：保留評論並標註「疑似 AI」；隱藏內容：隱藏評論正文但保留頭像、暱稱與互動按鈕；隱藏卡片：整條評論不顯示。"
+    },
+    "commentAicgActionDisabled": {
+        "message": "停用"
+    },
+    "commentAicgActionLabel": {
+        "message": "僅新增標籤"
+    },
+    "commentAicgActionHideContent": {
+        "message": "隱藏內容"
+    },
+    "commentAicgActionHideCard": {
+        "message": "隱藏卡片"
+    },
+    "commentAicgThreshold": {
+        "message": "判定門檻:"
+    },
+    "commentAicgThresholdDescription": {
+        "message": "疑似程度達到該值才會執行處理。數值越高越不容易誤傷真人評論，但也更容易漏掉疑似評論。預設 0.55。"
+    },
+    "commentAicgMinLength": {
+        "message": "最小檢測長度:"
+    },
+    "commentAicgMinLengthDescription": {
+        "message": "短於該長度（字元數）的評論不做結構類檢測，避免把口語化的短評論誤判。預設 12。"
+    },
+    "commentAicgDebug": {
+        "message": "顯示命中特徵"
+    },
+    "commentAicgDebugDescription": {
+        "message": "在「疑似 AI」標籤上顯示命中的檢測特徵，用於判斷該功能是否準確。"
+    },
+    "aicgSuspectLabel": {
+        "message": "疑似 AI"
+    },
+    "aicgShowContent": {
+        "message": "顯示內容"
+    },
+    "aicgHideContent": {
+        "message": "隱藏內容"
+    },
+    "aicgFeature_templateReuse": {
+        "message": "模板化表達"
+    },
+    "aicgFeature_crossCommentSimilarity": {
+        "message": "與其他評論高度相似"
+    },
+    "aicgFeature_duplicateFamily": {
+        "message": "屬於重複評論簇"
+    },
+    "aicgFeature_lowInformationDensity": {
+        "message": "資訊密度低"
+    },
+    "aicgFeature_personaSelfReference": {
+        "message": "人設化自我指稱"
+    },
+    "aicgFeature_reportToOwner": {
+        "message": "匯報式表達"
+    },
+    "aicgFeature_structuralUniformity": {
+        "message": "句式過於均勻"
+    },
+    "aicgFeature_punctuationRegularity": {
+        "message": "標點使用機械"
+    },
+    "category_commentAicg": {
+        "message": "疑似 AICG 內容"
+    },
+    "category_commentAicg_description": {
+        "message": "評論文字呈現模板複用、跨評論高度相似、句式過於均勻等特徵。這是疑似程度判斷，不代表確定的 AI 身分。"
     }
 }

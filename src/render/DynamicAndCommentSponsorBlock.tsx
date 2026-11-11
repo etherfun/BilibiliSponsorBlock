@@ -6,6 +6,9 @@ import { addCleanupListener } from "../utils/cleanup";
 import { insertSBIconDefinition } from "../thumbnail-utils/thumbnails";
 import { matchSponsorRules } from "../utils/sponsorRegex";
 import { getEffectiveSponsorRegexRules } from "../config/sponsorRegexOTA";
+import { AicgAction } from "../content/aicg/types";
+import { collectCommentNodes, processComments, readCommentText, restoreComments } from "../content/aicg/commentProcessor";
+import { normalizeCommentText } from "../content/aicg/text";
 
 export { DynamicListener, CommentListener };
 
@@ -149,6 +152,7 @@ function CommentListener() {
             if (!root.shadowRoot) continue;
             observeComments(root);
             SponsorComment(root);
+            detectAicgComments(root);
         }
     };
 
@@ -406,6 +410,42 @@ function getButton() {
     toggleButton.id = 'showDynamicSponsor';
     toggleButton.className = 'bili-dyn-action';
     return toggleButton;
+}
+
+/**
+ * 疑似 AICG 内容检测。
+ *
+ * 与商品链接过滤共用同一套「多层 ShadowRoot 发现 + MutationObserver 扫描」机制，
+ * 不新增全局观察器；检测层与执行层分别由 content/aicg 下的模块负责。
+ */
+function detectAicgComments(root: HTMLElement) {
+    const action = Config.config.commentAicgAction as unknown as AicgAction | undefined | null;
+    if (action === undefined || action === null || action === AicgAction.Disabled) {
+        // 设置被改为禁用时回滚本功能之前的处理结果。
+        restoreComments(collectCommentNodes(root));
+        return;
+    }
+
+    const nodes = collectCommentNodes(root);
+    if (!nodes.length) return;
+
+    const config = {
+        action: action,
+        // 设置页的 number 输入写回的是字符串，这里统一转成数字再参与比较。
+        threshold: Number(Config.config.commentAicgThreshold),
+        minLength: Number(Config.config.commentAicgMinLength),
+        debug: Boolean(Config.config.commentAicgDebug),
+    };
+
+    processComments(nodes, {
+        config,
+        debug: config.debug,
+        labels: {
+            suspect: chrome.i18n.getMessage("aicgSuspectLabel"),
+            show: chrome.i18n.getMessage("aicgShowContent"),
+            hide: chrome.i18n.getMessage("aicgHideContent"),
+        },
+    });
 }
 
 const expandedReplyThreads = new WeakSet<HTMLElement>();

@@ -2811,5 +2811,86 @@
     },
     "dynamicSponsorRegexRuleReset": {
         "message": "重置"
+    },
+    "commentAicg": {
+        "message": "Suspected AICG content"
+    },
+    "commentAicgDescription": {
+        "message": "Flags comments that show text patterns typical of AI-generated or batch-produced content. Applies to comments only. The result is a suspicion level, not a definitive AI verdict."
+    },
+    "commentAicgAction": {
+        "message": "Action:"
+    },
+    "commentAicgActionDescription": {
+        "message": "Disabled: no detection. Add label only: keep the comment and mark it \"Suspected AI\". Hide content: hide the comment body but keep avatar, name and action buttons. Hide card: do not show the comment at all."
+    },
+    "commentAicgActionDisabled": {
+        "message": "Disabled"
+    },
+    "commentAicgActionLabel": {
+        "message": "Add label only"
+    },
+    "commentAicgActionHideContent": {
+        "message": "Hide content"
+    },
+    "commentAicgActionHideCard": {
+        "message": "Hide card"
+    },
+    "commentAicgThreshold": {
+        "message": "Detection threshold:"
+    },
+    "commentAicgThresholdDescription": {
+        "message": "Only act when the suspicion level reaches this value. Higher values reduce false positives on real comments but miss more suspected ones. Default 0.55."
+    },
+    "commentAicgMinLength": {
+        "message": "Minimum length:"
+    },
+    "commentAicgMinLengthDescription": {
+        "message": "Comments shorter than this (in characters) skip structural detection, so short colloquial replies are not flagged. Default 12."
+    },
+    "commentAicgDebug": {
+        "message": "Show matched features"
+    },
+    "commentAicgDebugDescription": {
+        "message": "Show which detection features matched on the \"Suspected AI\" label, so you can judge how well it works."
+    },
+    "aicgSuspectLabel": {
+        "message": "Suspected AI"
+    },
+    "aicgShowContent": {
+        "message": "Show content"
+    },
+    "aicgHideContent": {
+        "message": "Hide content"
+    },
+    "aicgFeature_templateReuse": {
+        "message": "Template phrasing"
+    },
+    "aicgFeature_crossCommentSimilarity": {
+        "message": "Very similar to other comments"
+    },
+    "aicgFeature_duplicateFamily": {
+        "message": "Belongs to a repeated cluster"
+    },
+    "aicgFeature_lowInformationDensity": {
+        "message": "Low information density"
+    },
+    "aicgFeature_personaSelfReference": {
+        "message": "Persona self-reference"
+    },
+    "aicgFeature_reportToOwner": {
+        "message": "Report-style phrasing"
+    },
+    "aicgFeature_structuralUniformity": {
+        "message": "Overly uniform sentence structure"
+    },
+    "aicgFeature_punctuationRegularity": {
+        "message": "Mechanical punctuation"
+    },
+    "category_commentAicg": {
+        "message": "Suspected AICG content"
+    },
+    "category_commentAicg_description": {
+        "message": "The comment text shows patterns such as template reuse, high similarity to other comments, and overly uniform sentence structure. This is a suspicion level, not a definitive AI verdict."
     }
 }

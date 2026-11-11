@@ -1040,6 +1040,28 @@ svg {
 	color: white;
 }
 
+/*
+ * 疑似 AICG 内容设置块。
+ * 嵌在「隐藏 动态主页/评论区 的商品链接」内部，用一条强调色左边框标出这是什么，
+ * 但不改变原有选项的缩进与间距节奏。
+ */
+.aicg-settings {
+	margin-top: 6px;
+	padding: 2px 0 2px 14px;
+	border-left: 2px solid #8e2de2;
+}
+
+.aicg-settings-heading {
+	font-size: 15px;
+	font-weight: 600;
+	color: var(--white);
+	padding-top: 6px;
+}
+
+.aicg-settings > div[data-type] {
+	padding-bottom: 4px;
+}
+
 /* React styles */
 
 .categoryInlineDescription {
