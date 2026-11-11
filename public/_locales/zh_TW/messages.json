@@ -1717,13 +1717,13 @@
         "message": "啟用評論區隱藏"
     },
     "commentSponsorBlockDescription": {
-        "message": "評論區目前僅支持「商品連結」類別"
+        "message": "評論區的總開關。開啟後依下方類別表處理評論：目前支援「商品連結」與「疑似 AICG 內容」；關閉則完全不處理評論。"
     },
     "dynamicSponsorBlock": {
         "message": "啟用動態主頁隱藏"
     },
     "dynamicSponsorBlockDescription": {
-        "message": "動態主頁支持全部類別 (不包含視頻)"
+        "message": "動態主頁支持全部類別 (不包含視頻)；「疑似 AICG 內容」只作用於評論區"
     },
     "commentSponsorReplyBlock": {
         "message": "隱藏「商品連結」評論下的熱門子評論"

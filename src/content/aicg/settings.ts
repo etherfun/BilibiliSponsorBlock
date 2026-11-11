@@ -33,6 +33,7 @@ export function isAicgEnabled(): boolean {
     return getAicgOption() !== DynamicSponsorOption.Disabled;
 }
 
+
 /**
  * 读取 AICG 微调参数。
  * 设置页的 number 输入写回的是字符串，resolveAicgTuning 会把它们规范化为数字并校验范围。
@@ -48,10 +49,12 @@ export function getAicgTuning(): AicgTuning {
 /**
  * 评论区是否需要扫描。
  *
- * AICG 有自己的类别行，因此即使用户没开「启用评论区隐藏」，
- * 只要 AICG 类别不是禁用，也应该扫描评论。总开关仍然必须打开。
+ * 「启用评论区隐藏」就是评论区的总开关：界面文案也是这么写的，
+ * 所以 AICG 必须和商品链接一样受它约束，否则用户关掉这个开关后
+ * 评论仍会被打标签，与文案不符。总开关（dynamicAndCommentSponsorBlocker）
+ * 仍然必须打开。
  */
 export function shouldProcessComments(): boolean {
     if (!Config.config?.dynamicAndCommentSponsorBlocker) return false;
-    return Boolean(Config.config.commentSponsorBlock) || isAicgEnabled();
+    return Boolean(Config.config.commentSponsorBlock);
 }

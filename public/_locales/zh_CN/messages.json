@@ -1718,13 +1718,13 @@
         "message": "启用评论区隐藏"
     },
     "commentSponsorBlockDescription": {
-        "message": "评论区目前仅支持“商品链接”类别"
+        "message": "评论区的总开关。开启后按下方类别表处理评论：目前支持“商品链接”与“疑似 AICG 内容”；关闭则完全不处理评论。"
     },
     "dynamicSponsorBlock": {
         "message": "启用动态主页隐藏"
     },
     "dynamicSponsorBlockDescription": {
-        "message": "动态主页支持全部类别 (不包含视频)"
+        "message": "动态主页支持全部类别 (不包含视频)；“疑似 AICG 内容”只作用于评论区"
     },
     "commentSponsorReplyBlock": {
         "message": "隐藏“商品链接”评论下的热门子评论"

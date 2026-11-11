@@ -6,7 +6,7 @@ import { addCleanupListener } from "../utils/cleanup";
 import { insertSBIconDefinition } from "../thumbnail-utils/thumbnails";
 import { matchSponsorRules } from "../utils/sponsorRegex";
 import { getEffectiveSponsorRegexRules } from "../config/sponsorRegexOTA";
-import { AICG_CATEGORY, getAicgOption, getAicgTuning, shouldProcessComments } from "../content/aicg/settings";
+import { AICG_CATEGORY, getAicgOption, getAicgTuning, isAicgEnabled, shouldProcessComments } from "../content/aicg/settings";
 import { createAicgContext, HeuristicAicgDetector } from "../content/aicg/detector";
 import { decideAicgOption, summarizeFeatures } from "../content/aicg/decision";
 import { readCommentAuthor, readCommentText } from "../content/aicg/commentText";
@@ -599,7 +599,7 @@ function SponsorComment(root: HTMLElement) {
     const goodsOption = getCategorySelection("dynamicSponsor_sponsor")?.option ?? DynamicSponsorOption.Disabled;
     const aicgOption = getAicgOption();
     const goodsEnabled = goodsOption !== DynamicSponsorOption.Disabled;
-    const aicgEnabled = aicgOption !== DynamicSponsorOption.Disabled;
+    const aicgEnabled = isAicgEnabled();
     if (!goodsEnabled && !aicgEnabled) return;
 
     // 第一遍只读文本：疑似 AICG 需要跨评论上下文，一次扫描构建一次。

@@ -1718,13 +1718,13 @@
         "message": "启用评论区隐藏"
     },
     "commentSponsorBlockDescription": {
-        "message": "评论区目前仅支持“商品链接”类别"
+        "message": "Master switch for comments. When on, comments are handled by the category table below, which currently supports \u201cproduct links\u201d and \u201csuspected AICG content\u201d. When off, comments are not processed at all."
     },
     "dynamicSponsorBlock": {
         "message": "启用动态主页隐藏"
     },
     "dynamicSponsorBlockDescription": {
-        "message": "动态主页支持全部类别 (不包含视频)"
+        "message": "The dynamic feed supports all categories (video pages excluded). \u201cSuspected AICG content\u201d applies to comments only."
     },
     "commentSponsorReplyBlock": {
         "message": "隐藏“商品链接”评论下的热门子评论"

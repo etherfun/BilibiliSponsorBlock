@@ -274,6 +274,27 @@ describe("疑似 AICG 类别", () => {
         expect(labelIn([f.users[0]], "commentAicgLabel")).toHaveLength(0);
         expect(labelIn([f.users[1]], "commentAicgLabel")).toHaveLength(1);
     });
+    test("关闭「启用评论区隐藏」后，AICG 也不处理（与界面文案一致）", () => {
+        setAicg(DynamicSponsorOption.HideCard);
+        Config.config.commentSponsorBlock = false;
+        const f = fixture(Array.from({ length: 6 }, (_, i) => templateComment("owner", i)));
+        CommentListener();
+        jest.advanceTimersByTime(6000);
+
+        expect(f.cards[0].style.display).toBe("");
+        expect(labelIn(f.users, "commentAicgLabel")).toHaveLength(0);
+    });
+
+    test("总开关关闭时 AICG 也不处理", () => {
+        setAicg(DynamicSponsorOption.HideCard);
+        Config.config.dynamicAndCommentSponsorBlocker = false;
+        const f = fixture(Array.from({ length: 6 }, (_, i) => templateComment("owner", i)));
+        CommentListener();
+        jest.advanceTimersByTime(6000);
+
+        expect(f.cards[0].style.display).toBe("");
+        expect(labelIn(f.users, "commentAicgLabel")).toHaveLength(0);
+    });
 });
 
 describe("与商品链接类别共存", () => {
