@@ -7,8 +7,7 @@ import { insertSBIconDefinition } from "../thumbnail-utils/thumbnails";
 import { matchSponsorRules } from "../utils/sponsorRegex";
 import { getEffectiveSponsorRegexRules } from "../config/sponsorRegexOTA";
 import { AicgAction } from "../content/aicg/types";
-import { collectCommentNodes, processComments, readCommentText, restoreComments } from "../content/aicg/commentProcessor";
-import { normalizeCommentText } from "../content/aicg/text";
+import { collectCommentNodes, processComments, restoreComments } from "../content/aicg/commentProcessor";
 
 export { DynamicListener, CommentListener };
 

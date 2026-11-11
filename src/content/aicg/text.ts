@@ -47,7 +47,9 @@ export function asciiPunctuationCount(text: string): number {
     return (text ?? "").match(ASCII_PUNCT_RE)?.length ?? 0;
 }
 
-const EMOJI_RE = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu;
+// 只统计 emoji 主体码点；\uFE0F 这类变体选择符是修饰用的组合字符，
+// 放进字符类会被 no-misleading-character-class 判为可疑写法，且不该单独计数。
+const EMOJI_RE = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/gu;
 /** emoji 数量，用于识别口语化、拟人化表达。 */
 export function emojiCount(text: string): number {
     return (text ?? "").match(EMOJI_RE)?.length ?? 0;
