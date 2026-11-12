@@ -21,6 +21,8 @@ export type AicgFeatureId =
     | "ownerAddress"
     | "actionNarration"
     | "promoInstruction"
+    | "reportClosing"
+    | "sameAuthorBurst"
     | "reportToOwner"
     | "aiPhraseDensity";
 
@@ -44,6 +46,11 @@ export interface AicgCommentInput {
     peerAuthors?: readonly string[];
     /** 本条评论的作者标识 */
     author?: string;
+    /**
+     * 本作者在当前上下文里发的主评论条数（不含子评论）。
+     * 同一视频下连发 3 条以上主评论是批量行为的强信号（真人极少这样发）。
+     */
+    authorPostCount?: number;
     /** 检测时可用的最小文本长度，低于该长度不做结构类判断 */
     minDetectableLength?: number;
 }

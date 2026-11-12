@@ -393,11 +393,12 @@ describe("疑似 AICG 类别", () => {
         setAicg(DynamicSponsorOption.ShowOverlay);
         Config.config.commentAicgDebug = true;
         Config.config.commentAicgThreshold = 0.99;
-        // 三条模板 + 三条互不相关：有跨评论证据但强度不足以到 0.99
+        // 三条语改型模板（非逐字重复，有跨作者短语证据但强度有限）+ 三条真人：
+        // 有证据但都低于 0.99，应当提示建议阈值
         const f = fixture([
-            templateComment("owner", 0),
-            templateComment("owner", 1),
-            templateComment("owner", 2),
+            "@甲 别纠结了，新版跟源仓库彻底隔离、写操作全原子锁，两个进程并行也不踩。",
+            "@乙 值得看一眼：新版跟源仓库彻底隔离、写操作全原子锁，并排跑两个也稳。",
+            "@丙 我试过了。新版跟源仓库彻底隔离、写操作全原子锁，双开不会冲突。",
             HUMAN_COMMENT,
             "我上周也遇到过，重装一下插件就好了，不过记得先导出配置。",
             "这个功能在手机上确实不好用，我一般用电脑看。",

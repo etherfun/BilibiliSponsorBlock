@@ -28,8 +28,10 @@ import {
     jaccard,
     countOwnerAddress,
     countPersonaSelfReference,
+    countReportClosing,
     hasActionNarration,
     hasPromoInstruction,
+    hasPromoWithLink,
     looksColloquial,
     looksLikeReportToOwner,
     mean,
@@ -52,6 +54,8 @@ const FEATURE_WEIGHTS: Record<AicgFeatureId, number> = {
     ownerAddress: 1.2,
     actionNarration: 1.3,
     promoInstruction: 1.1,
+    reportClosing: 1.1,
+    sameAuthorBurst: 1.2,
     lowInformationDensity: 1.0,
     aiPhraseDensity: 0.6,
     structuralUniformity: 0.8,
@@ -61,18 +65,19 @@ const FEATURE_WEIGHTS: Record<AicgFeatureId, number> = {
 
 /**
  * 「单条标记」特征：它们描述的是**内容形态**（扮演人设、称呼主人、舞台指示、
- * 安装指令），不是「写得好不好」，所以单条评论就能成立。
+ * 推广行为、交差收尾、同账号连发），不是「写得好不好」，所以单条评论就能成立。
  *
- * 这是本次最重要的修正：真实场景里 AI 评论是**零散夹杂**在正常评论之间的，
+ * 这是实测后最重要的修正：真实场景里 AI 评论是**零散夹杂**在正常评论之间的，
  * 每条独立生成、互不相似，跨评论统计（bigram df、Jaccard、短语跨作者复用）
- * 永远到不了阈值，还会被正常评论稀释 —— 之前只有成簇证据一条通道，
- * 结果就是「疑似度恒为 0」。
+ * 永远到不了阈值，还会被正常评论稀释 —— 只有成簇一条通道时疑似度恒为 0。
  */
 const MARKER_FEATURES = new Set<AicgFeatureId>([
     "personaSelfReference",
     "ownerAddress",
     "actionNarration",
     "promoInstruction",
+    "reportClosing",
+    "sameAuthorBurst",
 ]);
 
 /**
@@ -108,7 +113,14 @@ const CONFIDENCE_SCALE = 1.25;
 const CROSS_COMMENT_REQUIRED = 0.45;
 
 /** 一个 bigram 出现在多少条评论里就算「模板化」片段。 */
-const TEMPLATE_DF_THRESHOLD = 5;
+const TEMPLATE_DF_THRESHOLD = 4;
+/**
+ * bigram 流行度上限（占上下文评论数的比例）：超过它的视为话题词而非模板。
+ * 「插件」「视频」这类词在讨论同一话题的评论区里 df 极高，但它们不是批量证据。
+ */
+const UBIQUITOUS_BIGRAM_RATIO = 0.35;
+/** 模板证据不再随长度打折的正文长度：低于它的评论即使复述模板，证据也按比例折减。 */
+const TEMPLATE_FULL_EVIDENCE_LENGTH = 60;
 /** 计算信息密度时，df 低于该值的 bigram 视为新鲜内容。 */
 const NOVELTY_DF_THRESHOLD = 4;
 /** 跨评论相似度超过该值才开始产生证据。 */
@@ -126,9 +138,16 @@ const MIN_CROSS_EVIDENCE_LENGTH = 20;
  * 短语复用：长度固定为 PHRASE_LEN 个字符、且被至少 PHRASE_AUTHOR_DF 个
  * **不同作者**用过的片段。要求跨作者，是为了把「同一个人刷屏」和
  * 「一批账号共用同一套话术」区分开 —— 后者才是批量生成的强证据。
+ *
+ * 8 字中文片段 + 3 个不同作者已经足够特异（8 字偶然重合率极低）；
+ * 之前要求 4 个，在「AI 评论零散夹杂、正常评论稀释」的真实评论区里
+ * 经常凑不齐，是命中率偏低的原因之一。
  */
 const PHRASE_LEN = 8;
-const PHRASE_AUTHOR_DF = 4;
+const PHRASE_AUTHOR_DF = 3;
+
+/** 同一作者的主评论数达到该值即视为批量行为（真人极少在一个视频下连发 3 条主评论）。 */
+const SAME_AUTHOR_BURST_MIN = 3;
 
 export interface AicgContext {
     /** 同一评论集合内的其它评论文本（不含被检测评论自身） */
@@ -281,9 +300,25 @@ export class HeuristicAicgDetector implements AicgDetector {
         const colloquial = looksColloquial(body) && textLength < 40;
         const tooShort = textLength < minLength || colloquial;
 
+        // ---- 强证据 4：跨作者共享短语覆盖度 ----
+        // 改写过措辞的 AI 评论 bigram 相似度可能不高，但「同一套事实包」的长片段
+        // 仍会被多个不同作者复用。这一项专门补改写型的召回。
+        // 先算它：模板复用是否打折取决于有没有长片段复用（见下）。
+        const phraseStrength = this.sharedPhraseCoverageStrength(normalizedText, ctx, tooShort);
+        if (phraseStrength > 0) {
+            features.push({
+                id: "sharedPhraseCoverage",
+                strength: phraseStrength,
+                reason: `sharedPhraseCoverage:${phraseStrength.toFixed(2)}`,
+            });
+        }
+
         // ---- 强证据 1：模板复用度 ----
         // 该评论中有多少比例的 bigram 是「很多评论都在用」的片段。
-        const templateStrength = this.templateReuseStrength(normalizedText, ctx, tooShort);
+        // 有长片段复用时按原强度计入；没有时按长度折减——
+        // 通用短评（30 字聊天的常见词占比高）不构成模板证据。
+        const templateStrength = this.templateReuseStrength(normalizedText, ctx, tooShort)
+            * (phraseStrength > 0 ? 1 : Math.min(1, textLength / TEMPLATE_FULL_EVIDENCE_LENGTH));
         if (templateStrength > 0) {
             features.push({
                 id: "templateReuse",
@@ -309,18 +344,6 @@ export class HeuristicAicgDetector implements AicgDetector {
                 id: "duplicateFamily",
                 strength: familyStrength,
                 reason: `duplicateFamily:${familyStrength.toFixed(2)}`,
-            });
-        }
-
-        // ---- 强证据 4：跨作者共享短语覆盖度 ----
-        // 改写过措辞的 AI 评论 bigram 相似度可能不高，但「同一套事实包」的长片段
-        // 仍会被多个不同作者复用。这一项专门补改写型的召回。
-        const phraseStrength = this.sharedPhraseCoverageStrength(normalizedText, ctx, tooShort);
-        if (phraseStrength > 0) {
-            features.push({
-                id: "sharedPhraseCoverage",
-                strength: phraseStrength,
-                reason: `sharedPhraseCoverage:${phraseStrength.toFixed(2)}`,
             });
         }
 
@@ -375,7 +398,7 @@ export class HeuristicAicgDetector implements AicgDetector {
             });
         }
 
-        if (!tooShort && hasPromoInstruction(body)) {
+        if (!tooShort && (hasPromoInstruction(body) || hasPromoWithLink(rawText))) {
             features.push({
                 id: "promoInstruction",
                 strength: 0.75,
@@ -383,10 +406,33 @@ export class HeuristicAicgDetector implements AicgDetector {
             });
         }
 
+        // ---- 标记 5：汇报式收尾 ----
+        const closingCount = countReportClosing(body);
+        if (!tooShort && closingCount > 0) {
+            features.push({
+                id: "reportClosing",
+                strength: Math.min(1, 0.7 + 0.1 * (closingCount - 1)),
+                reason: `reportClosing:${closingCount}`,
+            });
+        }
+
+        // ---- 标记 6：同账号连发 ----
+        // 真人极少在一个视频下连发 3 条以上主评论；这是纯元数据信号，
+        // 不依赖文本内容，对「每条都改写」的批量账号尤其有效。
+        const burstCount = input.authorPostCount ?? 0;
+        if (!tooShort && burstCount >= SAME_AUTHOR_BURST_MIN) {
+            features.push({
+                id: "sameAuthorBurst",
+                strength: Math.min(1, 0.6 + 0.1 * (burstCount - SAME_AUTHOR_BURST_MIN)),
+                reason: `sameAuthorBurst:${burstCount}`,
+            });
+        }
+
         // ---- 弱证据 7：汇报式结构 ----
         // 这是本评论区特有的词汇表（插件/分支/原子锁…），只作为辅助标记，
         // 单独不构成通道 A 的计数标记（它不在 MARKER_FEATURES 里）。
-        if (!tooShort && looksLikeReportToOwner(body, mentioned)) {
+        // @ 提及在任何位置都算——AI 评论常把「收件人」放在结尾。
+        if (!tooShort && looksLikeReportToOwner(body, mentioned || /@[\w\u4e00-\u9fff]/.test(rawText))) {
             features.push({
                 id: "reportToOwner",
                 strength: 0.5,
@@ -477,13 +523,23 @@ export class HeuristicAicgDetector implements AicgDetector {
         const grams = charNgrams(text, 2);
         // 短评论的 bigram 太少，随便一个常用词就能把比例刷高，因此不参与模板判定。
         if (!grams.size || tooShort || text.length < MIN_CROSS_EVIDENCE_LENGTH) return 0;
+        // 流行度上限：出现在远超半数评论里的 bigram 是话题词/停用词（「插件」「视频」「一下」），
+        // 不是模板证据——不加这条，讨论同一话题的正常短评会被整体判成模板。
+        // 但只在上下文足够大（≥30 条）时才适用：几条评论的小样本里
+        // 「大家都用」本来就说明是同一套话术，不能套比例上限。
+        const total = ctx.peerTexts.length;
+        const ubiquitousCap = total >= 30
+            ? Math.floor(UBIQUITOUS_BIGRAM_RATIO * total)
+            : Number.MAX_SAFE_INTEGER;
         let templateGrams = 0;
         for (const g of grams) {
-            // 计入被检测评论自身，df=1；阈值 5 表示「至少 5 条评论都在用」。
-            if ((ctx.bigramDf.get(g) ?? 0) >= TEMPLATE_DF_THRESHOLD) templateGrams++;
+            const df = ctx.bigramDf.get(g) ?? 0;
+            // 计入被检测评论自身；下限 = 至少几条评论在用，上限 = 还没普遍到成为话题词。
+            if (df >= TEMPLATE_DF_THRESHOLD && df <= ubiquitousCap) templateGrams++;
         }
         const ratio = templateGrams / grams.size;
         // 0.35 起步，0.85 封顶，避免单条短模板直接拉满。
+        // 长度折减在 detect() 里做：是否折减取决于有没有长片段复用。
         if (ratio < 0.35) return 0;
         return Math.min(1, (ratio - 0.35) / 0.5);
     }
@@ -634,6 +690,12 @@ export function detectComments(
     options?: { minDetectableLength?: number; authors?: readonly string[] },
 ): AicgDetectionResult[] {
     const context = createAicgContext(texts, options?.authors);
+    // 单元测试路径没有「主评论/子评论」之分，全部按主评论计数。
+    const postCounts = new Map<string, number>();
+    (options?.authors ?? []).forEach((author) => {
+        if (!author) return;
+        postCounts.set(author, (postCounts.get(author) ?? 0) + 1);
+    });
     const detector = new HeuristicAicgDetector();
     return texts.map((text, index) =>
         detector.detect(
@@ -641,6 +703,7 @@ export function detectComments(
                 text,
                 minDetectableLength: options?.minDetectableLength,
                 author: options?.authors?.[index],
+                authorPostCount: postCounts.get(options?.authors?.[index] ?? ""),
             },
             context,
         ),

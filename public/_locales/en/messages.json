@@ -2880,5 +2880,11 @@
     },
     "aicgFeature_ownerAddress": {
         "message": "Addresses the user as master"
+    },
+    "aicgFeature_sameAuthorBurst": {
+        "message": "Same account posting repeatedly"
+    },
+    "aicgFeature_reportClosing": {
+        "message": "Report-style sign-off"
     }
 }

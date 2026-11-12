@@ -616,10 +616,17 @@ function SponsorComment(root: HTMLElement) {
     const aicgDetector = aicgEnabled ? new HeuristicAicgDetector() : null;
     const aicgTuning = aicgEnabled ? getAicgTuning() : null;
     let aicgContext: ReturnType<typeof createAicgContext> | null = null;
+    /** 本次扫描里每个作者发的主评论数（不含子评论）：同账号连发是批量信号。 */
+    const authorPostCounts = new Map<string, number>();
     if (aicgEnabled) {
         forEachComment(root, (node) => {
             if (!node.content) return;
-            rememberPeer(readCommentText(node.content), readCommentAuthor(node.card));
+            const author = readCommentAuthor(node.card);
+            rememberPeer(readCommentText(node.content), author);
+            // 只有主评论计入连发统计；真人也可能连发好几条回复，那不算刷屏。
+            if (node.card.tagName.toLowerCase() === "bili-comment-renderer" && author) {
+                authorPostCounts.set(author, (authorPostCounts.get(author) ?? 0) + 1);
+            }
         });
         aicgContext = createAicgContext(peerCache.texts, peerCache.authors);
     }
@@ -633,15 +640,17 @@ function SponsorComment(root: HTMLElement) {
         const { card, content, labelAnchor, actions, replyButton } = node;
         if (!content) return;
 
-        const whitelisted = isWhitelistedAuthor(readCommentAuthor(card));
+        const author = readCommentAuthor(card);
+        const whitelisted = isWhitelistedAuthor(author);
         const target: CommentTarget = {
             card,
             content,
             labelAnchor,
             actions: actions ?? null,
             replyButton,
-            author: readCommentAuthor(card),
+            author,
             text: readCommentText(content),
+            authorPostCount: authorPostCounts.get(author) ?? 0,
         };
 
         if (goodsEnabled && !whitelisted) {
@@ -696,6 +705,8 @@ const AICG_MARKER_FEATURES = new Set<AicgFeatureId>([
     "ownerAddress",
     "actionNarration",
     "promoInstruction",
+    "reportClosing",
+    "sameAuthorBurst",
 ]);
 
 /** 这条 mutation 是否只是自检信息自己的变化（是则不该触发重新扫描）。 */
@@ -734,27 +745,29 @@ function renderAicgScanStatus(root: HTMLElement, stats: AicgScanStats): void {
             : "")
         + (stats.sample ? `\n样例：${stats.sample}` : "");
 
-    // 直接给出「接下来该看哪里」的提示，省得用户对着数字猜。
+    // 排查提示只在「零命中」时给出：已经有命中的话，用户要的不是排查建议。
     let hint = "";
-    if (stats.scanned === 0) {
-        hint = "→ 没有扫到任何评论，评论区可能还没加载出来。";
-    } else if (stats.empty === stats.scanned) {
-        hint = "→ 正文没读到，可能是 B 站评论结构变了（请把这行反馈给我）。";
-    } else if (stats.eligible === 0) {
-        hint = `→ 评论都短于最小长度 ${stats.minLength}，把「最小检测长度」调小试试。`;
-    } else if (stats.markerMax >= 2) {
-        hint = "→ 已经出现 2 个以上标记特征，本应命中；若没看到标签请把这几行反馈给我。";
-    } else if (stats.markerMax === 1) {
-        hint = "→ 只出现 1 个标记特征（人设/称呼/动作/推广），按设计需要 2 个以上才判定。";
-    } else if (stats.peers < 3) {
-        hint = "→ 上下文只有很少几条评论，既没有标记也凑不出跨评论证据；把评论区往下滚多加载几条。";
-    } else if (stats.featureMax === 0) {
-        hint = "→ 该批评论没有触发任何特征：它们大概率不是同一套模板/AI 文本。";
-    } else if (stats.top === 0) {
-        hint = "→ 命中了弱特征，但既没有 2 个以上标记、也没有跨评论证据，按设计不会标记。";
-    } else if (stats.hits === 0) {
-        const suggested = Math.max(0.05, Math.floor((stats.top - 0.05) * 20) / 20);
-        hint = `→ 有证据但最高只有 ${stats.top.toFixed(2)}，低于阈值 ${stats.threshold}；把阈值调到 ${suggested.toFixed(2)} 左右试试。`;
+    if (stats.hits === 0) {
+        if (stats.scanned === 0) {
+            hint = "→ 没有扫到任何评论，评论区可能还没加载出来。";
+        } else if (stats.empty === stats.scanned) {
+            hint = "→ 正文没读到，可能是 B 站评论结构变了（请把这行反馈给我）。";
+        } else if (stats.eligible === 0) {
+            hint = `→ 评论都短于最小长度 ${stats.minLength}，把「最小检测长度」调小试试。`;
+        } else if (stats.markerMax >= 2) {
+            hint = "→ 已经出现 2 个以上标记特征，本应命中；若没看到标签请把这几行反馈给我。";
+        } else if (stats.markerMax === 1) {
+            hint = "→ 只出现 1 个标记特征（人设/称呼/动作/推广/收尾/连发），按设计需要 2 个以上才判定。";
+        } else if (stats.peers < 3) {
+            hint = "→ 上下文只有很少几条评论，既没有标记也凑不出跨评论证据；把评论区往下滚多加载几条。";
+        } else if (stats.featureMax === 0) {
+            hint = "→ 该批评论没有触发任何特征：它们大概率不是同一套模板/AI 文本。";
+        } else if (stats.top === 0) {
+            hint = "→ 命中了弱特征，但既没有 2 个以上标记、也没有跨评论证据，按设计不会标记。";
+        } else {
+            const suggested = Math.max(0.05, Math.floor((stats.top - 0.05) * 20) / 20);
+            hint = `→ 有证据但最高只有 ${stats.top.toFixed(2)}，低于阈值 ${stats.threshold}；把阈值调到 ${suggested.toFixed(2)} 左右试试。`;
+        }
     }
 
     const fullText = hint ? `${text}\n${hint}` : text;
@@ -797,6 +810,8 @@ interface CommentTarget {
     replyButton: HTMLElement | null;
     author: string;
     text: string;
+    /** 本作者在本次扫描里的主评论数（0 表示拿不到作者信息） */
+    authorPostCount: number;
 }
 
 /** 白名单作者默认跳过；开启「无视白名单」后不再跳过。 */
@@ -870,7 +885,7 @@ function applyAicgCategory(
     }
 
     const result = detector.detect(
-        { text: target.text, minDetectableLength: tuning.minLength, peers: [], author: target.author },
+        { text: target.text, minDetectableLength: tuning.minLength, peers: [], author: target.author, authorPostCount: target.authorPostCount },
         context,
     );
     if (stats) {

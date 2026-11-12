@@ -191,18 +191,20 @@ export function hasAiBoilerplate(text: string): boolean {
  * 人设自称。这类「非人类身份的第一人称」是 AI 助手扮演人设的直接痕迹，
  * 而且**不依赖评论区里有没有同类评论**——单条就能成立。
  *
+ * 鱼/鲸 emoji 也算身份展示：在这个生态里它们是人设的一部分。
  * 注意排除「本人」「本视频」这类正常说法。
  */
-const PERSONA_SELF_RE = /本鲸|本鱼|本喵|本汪|本狐|本猫|本助手|本AI|本ai|僕|人家(?=[^\s，。！？、；：]*(?:记|觉|也|今天|来|去|看|跑|的|想|不|帮))/g;
+const PERSONA_SELF_RE = /本鲸|本鱼|本喵|本汪|本狐|本猫|本助手|本AI|本ai|僕|人家(?=[^\s，。！？、；：]*(?:记|觉|也|今天|来|去|看|跑|的|想|不|帮))|[\u{1F40B}\u{1F433}\u{1F41F}\u{1F420}\u{1F421}\u{1F988}]/gu;
 export function countPersonaSelfReference(text: string): number {
     return (text ?? "").match(PERSONA_SELF_RE)?.length ?? 0;
 }
 
 /**
  * 称呼用户为「主人」。AI 助手人设的典型称呼，真人讨论插件时极少这样写。
- * 排除「主人翁」这种固定词。
+ * 排除「主人翁」这种固定词，以及「艾特主人」这种**叙述行为**的写法
+ * （真人会说「我看到有人艾特主人」——是在描述动作，不是在称呼谁）。
  */
-const OWNER_ADDRESS_RE = /主人(?!翁)/g;
+const OWNER_ADDRESS_RE = /(?<!艾特)主人(?!翁)/g;
 export function countOwnerAddress(text: string): number {
     return (text ?? "").match(OWNER_ADDRESS_RE)?.length ?? 0;
 }
@@ -210,22 +212,53 @@ export function countOwnerAddress(text: string): number {
 /**
  * 括号里的动作/神态描写，例如「（尾巴慢悠悠划了个小圈）」「（把分支名记进本子）」。
  * 这是角色扮演式生成的典型输出，真人写评论很少带舞台指示。
+ * 鱼系身体语言（举双鳍赞成、尾巴竖起来）即使不在括号里也算——
+ * 它是「扮演非人类身份」的直接信号，比括号更常见。
  */
 const NARRATION_RE = /[（(][^）)]{4,40}[）)]/g;
-const NARRATION_ACTION_RE = /尾巴|鳍|耳朵|头|眼|爪子|记下|点头|叹气|竖起|竖起|甩|划|蹭|瞟|歪|蹭了蹭|装|掏出|翻开|记进|小声|沉默|认真|歪了歪/;
+const NARRATION_ACTION_RE = /尾巴|鳍|耳朵|头|眼|爪子|记下|点头|叹气|竖起|甩|划|蹭|瞟|歪|掏出|翻开|记进|小声|沉默|认真|歪了歪/;
+const FISH_BODY_RE = /双鳍|鱼鳍|鱼尾|举鳍|拍鳍|摆尾|甩尾|尾巴(慢悠悠|一甩|竖起|划|摇|翘)|尾鳍/;
 export function hasActionNarration(text: string): boolean {
     const source = text ?? "";
+    if (FISH_BODY_RE.test(source)) return true;
     const parens = source.match(NARRATION_RE);
     if (!parens) return false;
     return parens.some((part) => NARRATION_ACTION_RE.test(part));
 }
 
 /**
- * 安装/推广指令：「装填 @xxx」「包名带版本号」「先卸旧版」「第三方包」。
- * 评论区里贴安装步骤属于推广行为，和「AI 生成」是两件事，
- * 但组合起来是批量刷屏评论的典型形态。
+ * 汇报式收尾：「记下了」「回头再看」「先潜水了」「替你试水」。
+ * 是「向主人交差」语气的固定收束，真人聊天里偶尔出现，
+ * 所以只作标记之一，需要与其它标记配对。
+ * 注意不收「交差」——真人讨论 bot 行为时（「每轮必须发一条评论交差」）也会用这个词。
+ */
+const REPORT_CLOSING_RE = /记下了|记进本子|先记着|回头再(看|试|说|掂量|琢磨)|先(继续)?潜水|替你试水|爬回来报信|先告辞/g;
+export function countReportClosing(text: string): number {
+    return (text ?? "").match(REPORT_CLOSING_RE)?.length ?? 0;
+}
+
+/**
+ * 安装/推广行为：
+ * - 安装指令：「装填 @xxx」「包名带版本号」「先卸旧版」「第三方包」；
+ * - @人 + 视频链接：「@某人 对症就好……看这期：https://www.bilibili.com/video/BVxxx」，
+ *   这是批量刷屏评论里最大的一族——真人极少同时 @ 具体用户并附上推广视频链接。
  */
 const PROMO_INSTRUCTION_RE = /装填|安装时填|包名|先卸旧版|第三方包|装前先看|插件名记得带|填\s*@[\w-]+\/[\w-]+/;
+const VIDEO_LINK_RE = /b23\.tv|bilibili\.com\/(video|list|festival)|BV1[0-9A-Za-z]{9}/;
 export function hasPromoInstruction(text: string): boolean {
-    return PROMO_INSTRUCTION_RE.test(text ?? "");
+    const source = text ?? "";
+    if (PROMO_INSTRUCTION_RE.test(source)) return true;
+    return /@[\w\u4e00-\u9fff]/.test(source) && VIDEO_LINK_RE.test(source);
+}
+
+/**
+ * 顶层评论以 @人 开头并附视频链接：「@某人 对症就好……看这期：URL」。
+ * 这是批量刷屏最大一族的签名。只看原始文本且要求 @ 在开头——
+ * 回复里给楼友带链接（「回复 @A :你看这个 …」）是真人行为，不判。
+ * 注意要在剥 @ 前缀之前的原始文本上判断。
+ */
+export function hasPromoWithLink(rawText: string): boolean {
+    const source = (rawText ?? "").trim();
+    if (!/^@[\w\u4e00-\u9fff]/.test(source)) return false;
+    return VIDEO_LINK_RE.test(source);
 }

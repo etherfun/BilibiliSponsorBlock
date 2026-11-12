@@ -43,6 +43,8 @@ const AICG_KEYS = [
     "aicgFeature_ownerAddress",
     "aicgFeature_actionNarration",
     "aicgFeature_promoInstruction",
+    "aicgFeature_reportClosing",
+    "aicgFeature_sameAuthorBurst",
     "aicgFeature_reportToOwner",
     "aicgFeature_structuralUniformity",
     "aicgFeature_punctuationRegularity",

@@ -92,12 +92,19 @@ describe("零散夹杂的真实场景", () => {
     test("只有「主人」一个标记时不足以标记", () => {
         // 真人也会对着作者喊「主人」，单独一个称呼不能当证据
         const results = detectComments([
-            "主人，这期视频讲得挺清楚的，我回头再看一遍。",
+            "主人，这期视频讲得挺清楚的，信息量很大。",
             "主人，这插件在手机上真的用不了，设置页点不动。",
         ]);
         for (const result of results) {
             expect(result.confidence).toBeLessThan(0.55);
         }
+    });
+
+    test("「主人」+「汇报式收尾」成对出现即标记（AI 鱼评论的固定句式）", () => {
+        const results = detectComments([
+            "主人，这期视频讲得挺清楚的，我回头再看一遍。",
+        ]);
+        expect(results[0].confidence).toBeGreaterThanOrEqual(0.55);
     });
 
     test("人设自称 + 称呼主人 同时出现即标记（AI 鱼评论的典型形态）", () => {

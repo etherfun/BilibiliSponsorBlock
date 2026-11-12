@@ -2870,5 +2870,11 @@
     },
     "aicgFeature_ownerAddress": {
         "message": "稱呼使用者為「主人」"
+    },
+    "aicgFeature_sameAuthorBurst": {
+        "message": "同帳號連發多條"
+    },
+    "aicgFeature_reportClosing": {
+        "message": "匯報式收尾"
     }
 }
