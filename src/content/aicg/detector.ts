@@ -56,6 +56,10 @@ const FEATURE_WEIGHTS: Record<AicgFeatureId, number> = {
     promoInstruction: 1.1,
     reportClosing: 1.1,
     sameAuthorBurst: 1.2,
+    // 跨视频记忆：短语本身已经过「>=3 个作者在同一个视频」的检验
+    knownPhrase: 1.2,
+    // 用户显式教学的自定正则：combine() 里直接判 1，不走加权
+    userPattern: 3.0,
     lowInformationDensity: 1.0,
     aiPhraseDensity: 0.6,
     structuralUniformity: 0.8,
@@ -78,6 +82,7 @@ const MARKER_FEATURES = new Set<AicgFeatureId>([
     "promoInstruction",
     "reportClosing",
     "sameAuthorBurst",
+    "knownPhrase",
 ]);
 
 /**
@@ -148,6 +153,20 @@ const PHRASE_AUTHOR_DF = 3;
 
 /** 同一作者的主评论数达到该值即视为批量行为（真人极少在一个视频下连发 3 条主评论）。 */
 const SAME_AUTHOR_BURST_MIN = 3;
+
+/**
+ * 数一条评论命中了多少个「跨视频已知短语」（去重）。
+ * 已知短语是 8 字片段的集合，滑窗逐位查询，O(评论长度)。
+ */
+function countKnownPhraseWindows(normalizedText: string, known?: ReadonlySet<string>): number {
+    if (!known?.size || normalizedText.length < PHRASE_LEN) return 0;
+    const hit = new Set<string>();
+    for (let at = 0; at + PHRASE_LEN <= normalizedText.length; at++) {
+        const phrase = normalizedText.slice(at, at + PHRASE_LEN);
+        if (known.has(phrase)) hit.add(phrase);
+    }
+    return hit.size;
+}
 
 export interface AicgContext {
     /** 同一评论集合内的其它评论文本（不含被检测评论自身） */
@@ -428,6 +447,36 @@ export class HeuristicAicgDetector implements AicgDetector {
             });
         }
 
+        // ---- 标记 7：跨视频记忆的已知短语 ----
+        // 短语在被学习时已经过「同一个视频里 >=3 个不同作者在用」的检验，
+        // 新视频里再次出现说明同一批内容蔓延了过来。8 字滑窗 O(n)。
+        const knownHits = countKnownPhraseWindows(normalizedText, input.knownPhrases);
+        if (knownHits > 0) {
+            features.push({
+                id: "knownPhrase",
+                strength: Math.min(1, 0.7 + 0.15 * (knownHits - 1)),
+                reason: `knownPhrase:${knownHits}`,
+            });
+        }
+
+        // ---- 用户自定义规则：显式教学，命中即判定 ----
+        // 不受 tooShort/口语闸门限制——用户写的规则就是用户自己的判定标准。
+        // 正则同时匹配正文和原始文本（规则可能想匹配 @昵称 这类被剥掉的前缀）。
+        if (input.customPatterns?.length) {
+            for (const pattern of input.customPatterns) {
+                pattern.lastIndex = 0;
+                if (pattern.test(body) || pattern.test(rawText)) {
+                    features.push({
+                        id: "userPattern",
+                        strength: 1,
+                        reason: "userPattern",
+                    });
+                    break;
+                }
+                pattern.lastIndex = 0;
+            }
+        }
+
         // ---- 弱证据 7：汇报式结构 ----
         // 这是本评论区特有的词汇表（插件/分支/原子锁…），只作为辅助标记，
         // 单独不构成通道 A 的计数标记（它不在 MARKER_FEATURES 里）。
@@ -633,6 +682,9 @@ const MARKER_STEP = 0.12;
 function combine(features: readonly AicgFeatureEvidence[], boost: number): AicgConfidence {
     if (!features.length) return 0;
 
+    // 用户自定义规则是显式教学：命中即判 1，不参与加权（同类净化扩展的黑名单语义）。
+    if (features.some((feature) => feature.id === "userPattern")) return 1;
+
     let numerator = 0;
     let denominator = 0;
     let strongestCrossComment = 0;
@@ -687,7 +739,12 @@ function emptyResult(normalizedText: string, textLength: number, tooShort: boole
 /** 便捷函数：一次性检测一组评论并返回每条结果。 */
 export function detectComments(
     texts: readonly string[],
-    options?: { minDetectableLength?: number; authors?: readonly string[] },
+    options?: {
+        minDetectableLength?: number;
+        authors?: readonly string[];
+        customPatterns?: readonly RegExp[];
+        knownPhrases?: ReadonlySet<string>;
+    },
 ): AicgDetectionResult[] {
     const context = createAicgContext(texts, options?.authors);
     // 单元测试路径没有「主评论/子评论」之分，全部按主评论计数。
@@ -704,6 +761,8 @@ export function detectComments(
                 minDetectableLength: options?.minDetectableLength,
                 author: options?.authors?.[index],
                 authorPostCount: postCounts.get(options?.authors?.[index] ?? ""),
+                customPatterns: options?.customPatterns,
+                knownPhrases: options?.knownPhrases,
             },
             context,
         ),

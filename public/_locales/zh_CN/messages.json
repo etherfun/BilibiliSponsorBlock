@@ -2886,5 +2886,17 @@
     },
     "aicgFeature_reportClosing": {
         "message": "汇报式收尾"
+    },
+    "aicgFeature_userPattern": {
+        "message": "用户自定义规则"
+    },
+    "commentAicgCustomRulesPlaceholder": {
+        "message": "例如：彻底隔离|写操作全原子锁\n无效的行会被忽略"
+    },
+    "aicgFeature_knownPhrase": {
+        "message": "跨视频已知刷屏短语"
+    },
+    "commentAicgCustomRulesShort": {
+        "message": "自定义正则（每行一条，命中即标记）"
     }
 }

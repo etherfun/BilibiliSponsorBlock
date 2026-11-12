@@ -2876,5 +2876,17 @@
     },
     "aicgFeature_reportClosing": {
         "message": "匯報式收尾"
+    },
+    "aicgFeature_userPattern": {
+        "message": "使用者自訂規則"
+    },
+    "commentAicgCustomRulesPlaceholder": {
+        "message": "例如：徹底隔離|寫操作全原子鎖\n無效的行會被忽略"
+    },
+    "aicgFeature_knownPhrase": {
+        "message": "跨影片已知刷屏短語"
+    },
+    "commentAicgCustomRulesShort": {
+        "message": "自訂正則（每行一條，命中即標記）"
     }
 }

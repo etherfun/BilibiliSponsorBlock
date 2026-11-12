@@ -118,6 +118,9 @@ function CommentListener() {
         return;
     }
 
+    // 跨视频的已知刷屏短语记忆：异步加载，首次扫描可能还没到，之后的扫描会带上
+    loadKnownPhrases();
+
     const observers = new Map<HTMLElement, { shadow: ShadowRoot; observer: MutationObserver }>();
     const scan = () => {
         for (const [root, entry] of observers) {
@@ -185,6 +188,7 @@ function CommentListener() {
         clearTimeout(timer);
         // 页面/视频切换后旧评论的上下文不能再参与判定
         resetAicgPeerCache();
+        persistKnownPhrases(true);
         pageObserver.disconnect();
         document.removeEventListener("visibilitychange", scan);
         for (const { observer } of observers.values()) observer.disconnect();
@@ -530,6 +534,8 @@ interface CommentNode {
     labelAnchor: HTMLElement | undefined;
     actions: ShadowRoot | undefined;
     replyButton: HTMLElement | null;
+    /** 评论者是本视频 UP 主（用户信息区带 UP 徽章）：内容创作方，不参与 AICG 判定 */
+    isUpAuthor: boolean;
 }
 
 function forEachComment(root: HTMLElement, visit: (node: CommentNode) => void): void {
@@ -541,6 +547,8 @@ function forEachComment(root: HTMLElement, visit: (node: CommentNode) => void): 
         if (!card || !cardShadow) return;
         const userInfo = cardShadow.querySelector("bili-comment-user-info")?.shadowRoot ?? undefined;
         const actions = cardShadow.querySelector("bili-comment-action-buttons-renderer")?.shadowRoot ?? undefined;
+        // UP 徽章只在该评论者是 UP 主时渲染且有文字；空壳元素不算
+        const upBadge = userInfo?.querySelector("#user-up");
         visit({
             card,
             shadow: cardShadow,
@@ -549,6 +557,7 @@ function forEachComment(root: HTMLElement, visit: (node: CommentNode) => void): 
             labelAnchor: userInfo?.querySelector<HTMLElement>("#user-up, #user-level"),
             actions,
             replyButton: actions?.querySelector<HTMLElement>("#reply") ?? null,
+            isUpAuthor: Boolean(upBadge && /UP/i.test(upBadge.textContent ?? "")),
         });
     };
 
@@ -600,6 +609,103 @@ function rememberPeer(text: string, author: string): void {
 }
 
 /**
+ * 跨视频已知短语记忆。
+ *
+ * 学习来源：某个视频里被「>=3 个不同作者」共用过的 8 字片段（ctx.sharedPhrases）。
+ * 这类片段几乎不可能是自然重合——学到后存入 storage.local（仅本地），
+ * 之后在任何视频里再次出现，都作为「已知刷屏短语」标记参与判定。
+ * 这解决的是「同一批内容蔓延到别的视频，但那个视频里只有零星几条」的场景。
+ *
+ * 隐私说明：只存 8 字片段，不存完整评论，只写本地 storage.local。
+ */
+const KNOWN_PHRASES_KEY = "aicgKnownPhrases";
+const KNOWN_PHRASES_LIMIT = 600;
+const KNOWN_PHRASES_WRITE_INTERVAL = 60_000;
+const knownPhrases = new Map<string, number>();
+let knownPhrasesLoaded = false;
+let knownPhrasesDirty = false;
+let knownPhrasesLastWrite = 0;
+
+function loadKnownPhrases(): void {
+    try {
+        const storage = (globalThis as unknown as {
+            chrome?: { storage?: { local?: { get?: (keys: string, done: (items: Record<string, unknown>) => void) => void } } };
+        }).chrome?.storage?.local;
+        if (!storage?.get) {
+            knownPhrasesLoaded = true;
+            return;
+        }
+        storage.get(KNOWN_PHRASES_KEY, (items) => {
+            const raw = items?.[KNOWN_PHRASES_KEY];
+            if (raw && typeof raw === "object") {
+                for (const [phrase, seen] of Object.entries(raw)) {
+                    knownPhrases.set(phrase, Number(seen) || 0);
+                }
+            }
+            knownPhrasesLoaded = true;
+        });
+    } catch {
+        knownPhrasesLoaded = true;
+    }
+}
+
+function rememberKnownPhrases(context: { sharedPhrases: ReadonlySet<string> }): void {
+    if (!knownPhrasesLoaded) return;
+    const now = Date.now();
+    for (const phrase of context.sharedPhrases) {
+        if (knownPhrases.size < KNOWN_PHRASES_LIMIT || knownPhrases.has(phrase)) {
+            knownPhrases.set(phrase, now);
+            knownPhrasesDirty = true;
+        }
+    }
+}
+
+function persistKnownPhrases(force = false): void {
+    if (!knownPhrasesDirty || !knownPhrasesLoaded) return;
+    const now = Date.now();
+    if (!force && now - knownPhrasesLastWrite < KNOWN_PHRASES_WRITE_INTERVAL) return;
+
+    knownPhrasesDirty = false;
+    knownPhrasesLastWrite = now;
+    // 超上限时保留最近使用的 600 条
+    const entries = [...knownPhrases.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, KNOWN_PHRASES_LIMIT);
+    knownPhrases.clear();
+    for (const [phrase, seen] of entries) knownPhrases.set(phrase, seen);
+
+    try {
+        const storage = (globalThis as unknown as {
+            chrome?: { storage?: { local?: { set?: (values: Record<string, unknown>) => void } } };
+        }).chrome?.storage?.local;
+        storage?.set?.({ [KNOWN_PHRASES_KEY]: Object.fromEntries(entries) });
+    } catch {
+        // 存储不可用（如测试环境）时静默跳过，记忆只留在本次会话内。
+    }
+}
+
+/** 用户自定义正则的编译缓存：配置没变就不重复编译。 */
+let customRulesCache: { raw: string; list: RegExp[] } = { raw: "", list: [] };
+
+function compileAicgCustomRules(): RegExp[] {
+    const raw = String(Config.config.commentAicgCustomRules ?? "");
+    if (raw === customRulesCache.raw) return customRulesCache.list;
+    const list: RegExp[] = [];
+    for (const line of raw.split(/\r?\n/)) {
+        const pattern = line.trim();
+        if (!pattern || pattern.length > 200) continue;
+        try {
+            list.push(new RegExp(pattern, "iu"));
+        } catch {
+            // 无效正则直接忽略，不让一条坏规则拖垮整个功能
+        }
+        if (list.length >= 20) break;
+    }
+    customRulesCache = { raw, list };
+    return list;
+}
+
+/**
  * 评论区过滤：商品链接与疑似 AICG 共用同一条执行路径。
  *
  * 判定是外置的（`content/aicg/detector`），这里只做三件事：
@@ -615,6 +721,8 @@ function SponsorComment(root: HTMLElement) {
     // 第一遍只读文本：疑似 AICG 需要跨评论上下文，一次扫描构建一次。
     const aicgDetector = aicgEnabled ? new HeuristicAicgDetector() : null;
     const aicgTuning = aicgEnabled ? getAicgTuning() : null;
+    const customPatterns = aicgEnabled ? compileAicgCustomRules() : [];
+    let knownPhraseSet: ReadonlySet<string> | undefined;
     let aicgContext: ReturnType<typeof createAicgContext> | null = null;
     /** 本次扫描里每个作者发的主评论数（不含子评论）：同账号连发是批量信号。 */
     const authorPostCounts = new Map<string, number>();
@@ -629,6 +737,12 @@ function SponsorComment(root: HTMLElement) {
             }
         });
         aicgContext = createAicgContext(peerCache.texts, peerCache.authors);
+        // 跨视频记忆：把之前视频学到的刷屏短语并入本视频的共享短语，
+        // 再把本视频新学到的短语记下来（节流写回 storage.local）。
+        for (const phrase of knownPhrases.keys()) aicgContext.sharedPhrases.add(phrase);
+        rememberKnownPhrases(aicgContext);
+        persistKnownPhrases();
+        knownPhraseSet = knownPhrases.size ? new Set<string>(knownPhrases.keys()) : undefined;
     }
 
     // 第二遍落地：两个类别各读自己的选项，复用同一套打标签/隐藏函数。
@@ -637,11 +751,11 @@ function SponsorComment(root: HTMLElement) {
         : null;
 
     forEachComment(root, (node) => {
-        const { card, content, labelAnchor, actions, replyButton } = node;
+        const { card, content, labelAnchor, actions, replyButton, isUpAuthor } = node;
         if (!content) return;
 
         const author = readCommentAuthor(card);
-        const whitelisted = isWhitelistedAuthor(author);
+        const channelWhitelisted = isWhitelistedAuthor(author);
         const target: CommentTarget = {
             card,
             content,
@@ -653,14 +767,16 @@ function SponsorComment(root: HTMLElement) {
             authorPostCount: authorPostCounts.get(author) ?? 0,
         };
 
-        if (goodsEnabled && !whitelisted) {
+        if (goodsEnabled && !channelWhitelisted) {
             applyGoodsCategory(target, goodsOption);
         } else if (getApplied(card, "dynamicSponsor_sponsor")) {
             revertCategory(target, "dynamicSponsor_sponsor");
         }
 
-        if (aicgEnabled && !whitelisted && aicgDetector && aicgTuning && aicgContext) {
-            applyAicgCategory(target, aicgOption, aicgDetector, aicgTuning, aicgContext, stats ?? undefined);
+        // UP 主自己的评论不参与 AICG 判定（置顶说明、内容创作方）；
+        // 商品链接类别的既有行为保持不变。
+        if (aicgEnabled && !channelWhitelisted && !isUpAuthor && aicgDetector && aicgTuning && aicgContext) {
+            applyAicgCategory(target, aicgOption, aicgDetector, aicgTuning, aicgContext, customPatterns, knownPhraseSet, stats ?? undefined);
         } else if (getApplied(card, AICG_CATEGORY)) {
             // 类别被关掉后，把之前加上的标签/隐藏效果回滚，避免设置改了页面没变。
             revertCategory(target, AICG_CATEGORY);
@@ -854,6 +970,8 @@ function applyAicgCategory(
     detector: HeuristicAicgDetector,
     tuning: ReturnType<typeof getAicgTuning>,
     context: ReturnType<typeof createAicgContext>,
+    customPatterns: readonly RegExp[],
+    knownPhraseSet?: ReadonlySet<string>,
     stats?: AicgScanStats,
 ): void {
     if (stats) stats.scanned++;
@@ -885,7 +1003,7 @@ function applyAicgCategory(
     }
 
     const result = detector.detect(
-        { text: target.text, minDetectableLength: tuning.minLength, peers: [], author: target.author, authorPostCount: target.authorPostCount },
+        { text: target.text, minDetectableLength: tuning.minLength, peers: [], author: target.author, authorPostCount: target.authorPostCount, knownPhrases: knownPhraseSet, customPatterns },
         context,
     );
     if (stats) {

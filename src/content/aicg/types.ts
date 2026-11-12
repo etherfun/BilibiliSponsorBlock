@@ -23,6 +23,8 @@ export type AicgFeatureId =
     | "promoInstruction"
     | "reportClosing"
     | "sameAuthorBurst"
+    | "knownPhrase"
+    | "userPattern"
     | "reportToOwner"
     | "aiPhraseDensity";
 
@@ -51,6 +53,16 @@ export interface AicgCommentInput {
      * 同一视频下连发 3 条以上主评论是批量行为的强信号（真人极少这样发）。
      */
     authorPostCount?: number;
+    /**
+     * 跨视频记忆的已知刷屏短语（8 字片段，由之前的扫描学习而来）。
+     * 评论命中已知短语说明同一批内容蔓延到了当前视频。
+     */
+    knownPhrases?: ReadonlySet<string>;
+    /**
+     * 用户自定义正则（已编译）。命中即判定——这是显式教学，
+     * 用户比通用规则更了解自己评论区的黑话（同类净化扩展的通行语义）。
+     */
+    customPatterns?: readonly RegExp[];
     /** 检测时可用的最小文本长度，低于该长度不做结构类判断 */
     minDetectableLength?: number;
 }

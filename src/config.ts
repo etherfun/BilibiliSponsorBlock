@@ -142,6 +142,11 @@ interface SBConfig {
     commentAicgMinLength: number;
     /** 在标签上显示命中的检测特征，便于用户判断 */
     commentAicgDebug: boolean;
+    /**
+     * 用户自定义正则（每行一条）：命中的评论直接按该类别处理方式标记。
+     * 这是显式教学——用户比通用规则更了解自己评论区的黑话。
+     */
+    commentAicgCustomRules: string;
 
     showNewIcon: boolean;
 
@@ -389,6 +394,13 @@ function migrateOldSyncFormats(config: SBConfig, initialSyncKeys: ReadonlySet<st
     if (typeof config["commentAicgMinLength"] !== "number" || config["commentAicgMinLength"] < 0) {
         config["commentAicgMinLength"] = syncDefaults.commentAicgMinLength;
     }
+    // 自定义正则总量设上限，防止异常大的值把存储和每次扫描都拖垮。
+    if (typeof config["commentAicgCustomRules"] === "string" && config["commentAicgCustomRules"].length > 4000) {
+        config["commentAicgCustomRules"] = config["commentAicgCustomRules"].slice(0, 4000);
+    }
+    if (typeof config["commentAicgCustomRules"] !== "string") {
+        config["commentAicgCustomRules"] = syncDefaults.commentAicgCustomRules;
+    }
 
     // 已有的 dynamicSponsorSelections 是在旧版本里写过盘的数组，addDefaults 只看「键存不存在」，
     // 不会把新增的类别补进去。这里按名字合并一次，保证新类别（如 dynamicSponsor_aicg）
@@ -600,6 +612,7 @@ const syncDefaults = {
     commentAicgThreshold: 0.55,
     commentAicgMinLength: 12,
     commentAicgDebug: false,
+    commentAicgCustomRules: "",
 
     showNewIcon: true,
 

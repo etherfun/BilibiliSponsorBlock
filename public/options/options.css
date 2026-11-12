@@ -193,6 +193,20 @@ body {
 	padding-bottom: 15px;
 }
 
+/* AICG 自定义正则的多行输入框 */
+.category-extra-textarea textarea {
+	width: 100%;
+	max-width: 480px;
+	box-sizing: border-box;
+	font-family: inherit;
+	font-size: 12px;
+	line-height: 1.5;
+	padding: 6px 8px;
+	border-radius: 6px;
+	border: 1px solid var(--options-entry-border, #888);
+	resize: vertical;
+}
+
 #music_offtopic_autoSkipOnMusicVideos {
 	padding-bottom: 0;
 }

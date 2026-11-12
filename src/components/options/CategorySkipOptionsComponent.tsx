@@ -29,7 +29,8 @@ export interface ToggleOption {
 /** 类别行下方挂载的附加设置：布尔开关或数字输入。 */
 export type ExtraOption =
     | { type: "toggle"; configKey: string; label: string }
-    | { type: "number"; configKey: string; label: string; step: number; min: number; max: number };
+    | { type: "number"; configKey: string; label: string; step: number; min: number; max: number }
+    | { type: "textarea"; configKey: string; label: string; placeholder?: string };
 
 class CategorySkipOptionsComponent extends React.Component<CategorySkipOptionsProps, CategorySkipOptionsState> {
     setBarColorTimeout: NodeJS.Timeout;
@@ -345,6 +346,18 @@ class DynamicSponsorHideOptionsComponent extends React.Component<CategorySkipOpt
                                     }}
                                 />
                             </label>
+                        ) : option.type === "textarea" ? (
+                            <label className="number-container category-extra-textarea">
+                                <span className="optionLabel">{option.label}</span>
+                                <textarea
+                                    rows={3}
+                                    placeholder={option.placeholder}
+                                    defaultValue={String(Config.config[option.configKey] ?? "")}
+                                    onChange={(event) => {
+                                        Config.config[option.configKey] = event.target.value;
+                                    }}
+                                />
+                            </label>
                         ) : (
                             <ToggleOptionComponent
                                 configKey={option.configKey}
@@ -384,6 +397,12 @@ class DynamicSponsorHideOptionsComponent extends React.Component<CategorySkipOpt
                         type: "toggle",
                         configKey: "commentAicgDebug",
                         label: chrome.i18n.getMessage("commentAicgDebug"),
+                    },
+                    {
+                        type: "textarea",
+                        configKey: "commentAicgCustomRules",
+                        label: chrome.i18n.getMessage("commentAicgCustomRulesShort"),
+                        placeholder: chrome.i18n.getMessage("commentAicgCustomRulesPlaceholder"),
                     },
                 ];
             default:

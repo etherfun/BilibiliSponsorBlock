@@ -248,6 +248,25 @@ describe("HeuristicAicgDetector", () => {
         expect(result.confidence).toBe(0);
     });
 
+    test("用户自定义正则命中即判定（显式教学，不需要其它证据）", () => {
+        const [hit] = detectComments(["这版把仓库分开、写盘有锁，挺稳。"], { customPatterns: [/写盘有锁/i] });
+        expect(hit.confidence).toBe(1);
+        expect(hit.features.map((f) => f.id)).toContain("userPattern");
+
+        const [miss] = detectComments(["今天天气不错，出门走走顺便刷视频。"], { customPatterns: [/彻底隔离/] });
+        expect(miss.confidence).toBeLessThan(0.55);
+    });
+
+    test("已知短语是标记之一：单独出现不判定，配对即判定", () => {
+        const known = new Set(["跟源仓库彻底隔离"]);
+        const [solo] = detectComments(["这版跟源仓库彻底隔离了，写盘有锁，稳。"], { knownPhrases: known });
+        expect(solo.features.map((f) => f.id)).toContain("knownPhrase");
+        expect(solo.confidence).toBeLessThan(0.55);
+
+        const [paired] = detectComments(["主人，这版跟源仓库彻底隔离了，写盘有锁，稳。"], { knownPhrases: known });
+        expect(paired.confidence).toBeGreaterThanOrEqual(0.55);
+    });
+
     test("empty text produces no evidence", () => {
         const result = new HeuristicAicgDetector().detect({ text: "" });
         expect(result.confidence).toBe(0);

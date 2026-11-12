@@ -2886,5 +2886,17 @@
     },
     "aicgFeature_reportClosing": {
         "message": "Report-style sign-off"
+    },
+    "aicgFeature_userPattern": {
+        "message": "Custom user rule"
+    },
+    "commentAicgCustomRulesPlaceholder": {
+        "message": "e.g. pattern1|pattern2\nInvalid lines are ignored"
+    },
+    "aicgFeature_knownPhrase": {
+        "message": "Known spam phrase from other videos"
+    },
+    "commentAicgCustomRulesShort": {
+        "message": "Custom regex (one per line, matches are always labeled)"
     }
 }

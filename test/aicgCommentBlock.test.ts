@@ -463,3 +463,78 @@ describe("与商品链接类别共存", () => {
         expect(labelIn(f.users, "commentAicgLabel")).toHaveLength(0);
     });
 });
+
+describe("借鉴同类插件的能力（bilibili-cleaner / YouTube 反垃圾工具）", () => {
+    test("用户自定义正则命中即标记：单条评论、无需跨评论证据", () => {
+        Config.config.commentAicgCustomRules = "彻底隔离|写操作全原子锁";
+        setAicg(DynamicSponsorOption.ShowOverlay);
+        // 语改型单条评论：没有成簇证据，也没有任何内容标记
+        const f = fixture(["这版跟源仓库彻底隔离了，写盘还有锁保护，挺稳的。"], { authors: ["solo"] });
+        CommentListener();
+        jest.advanceTimersByTime(6000);
+
+        expect(labelIn(f.users, "commentAicgLabel")).toHaveLength(1);
+    });
+
+    test("无效的自定义正则被忽略，不影响其它规则", () => {
+        Config.config.commentAicgCustomRules = "([彻底隔离\n真的彻底隔离";
+        setAicg(DynamicSponsorOption.ShowOverlay);
+        const f = fixture(["评论区有人说真的彻底隔离了，我来求证一下。"], { authors: ["solo"] });
+        CommentListener();
+        jest.advanceTimersByTime(6000);
+
+        expect(labelIn(f.users, "commentAicgLabel")).toHaveLength(1);
+    });
+
+    test("UP 主自己的评论不参与 AICG 判定", () => {
+        setAicg(DynamicSponsorOption.ShowOverlay);
+        const f = fixture(Array.from({ length: 6 }, (_, i) => templateComment("owner", i)));
+        // 给第一条评论挂 UP 徽章（真实 DOM 里 UP 徽章只给视频主人）
+        f.users[0].shadowRoot.innerHTML = '<span id="user-up">UP主</span><span id="user-level">Lv6</span>';
+        CommentListener();
+        jest.advanceTimersByTime(6000);
+
+        expect(labelIn(f.users, "commentAicgLabel")).toHaveLength(5);
+        expect(f.users[0].shadowRoot.querySelector("#commentAicgLabel")).toBeNull();
+    });
+
+    test("跨视频记忆：本视频学到的短语写回 storage.local", () => {
+        const written: Array<Record<string, unknown>> = [];
+        (global as unknown as { chrome: unknown }).chrome = {
+            i18n: { getMessage: (key: string) => key },
+            storage: {
+                local: {
+                    get: (_key: unknown, done: (items: unknown) => void) => done({}),
+                    set: (values: Record<string, unknown>) => written.push(values),
+                },
+            },
+        };
+        setAicg(DynamicSponsorOption.ShowOverlay);
+        const f = fixture(Array.from({ length: 6 }, (_, i) => templateComment("owner", i)));
+        CommentListener();
+        jest.advanceTimersByTime(6000);
+
+        const phrases = written.flatMap((write) => Object.keys(write.aicgKnownPhrases ?? {}));
+        expect(phrases).toContain("跟源仓库彻底隔离");
+    });
+
+    test("跨视频记忆：之前视频学到的短语在新视频里参与判定", () => {
+        const localStore: Record<string, unknown> = { aicgKnownPhrases: { "跟源仓库彻底隔离": 1 } };
+        (global as unknown as { chrome: unknown }).chrome = {
+            i18n: { getMessage: (key: string) => key },
+            storage: {
+                local: {
+                    get: (_key: unknown, done: (items: unknown) => void) => done(localStore),
+                    set: () => undefined,
+                },
+            },
+        };
+        setAicg(DynamicSponsorOption.ShowOverlay);
+        // 单条评论同时含已知短语 + 称呼主人：两个标记配对即命中
+        const f = fixture(["主人，这版跟源仓库彻底隔离了，写盘有锁，稳。"], { authors: ["solo"] });
+        CommentListener();
+        jest.advanceTimersByTime(6000);
+
+        expect(labelIn(f.users, "commentAicgLabel")).toHaveLength(1);
+    });
+});
